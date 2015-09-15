@@ -22,7 +22,10 @@ public class Client extends JFrame {
 	int port = 0;
 	Socket client = null;
 	Writer writer = null;
-	private JTextField textField;
+	BufferedReader br = null;  //A buffer to store the message from the server
+
+    
+	private JTextField messageField;
 	public Client() throws Exception {
 		getContentPane().setLayout(null);
 		JButton btnReservation = new JButton("Reservation");
@@ -50,10 +53,10 @@ public class Client extends JFrame {
 		lblWelcomeToUse.setBounds(78, 31, 312, 16);
 		getContentPane().add(lblWelcomeToUse);
 		
-		textField = new JTextField();
-		textField.setBounds(243, 113, 134, 149);
-		getContentPane().add(textField);
-		textField.setColumns(10);
+		messageField = new JTextField();
+		messageField.setBounds(243, 113, 134, 149);
+		getContentPane().add(messageField);
+		messageField.setColumns(10);
 		
 		JLabel lblFromServerSystem = new JLabel("From server system:");
 		lblFromServerSystem.setBounds(243, 78, 147, 16);
@@ -63,10 +66,30 @@ public class Client extends JFrame {
 		port = 3333;
 		client = new Socket(host, port);
 		writer = new OutputStreamWriter(client.getOutputStream());
+		//Ready to read the server message
+		br = new BufferedReader(new InputStreamReader(client.getInputStream()));
+		
+		
 	}
-	
+	//Refresh the message from the server
+	public void refreshMessage() throws IOException {
+		StringBuffer sb = new StringBuffer();
+		String message;
+		int index;  
+	    while ((message=br.readLine()) != null) {  
+	         if ((index = message.indexOf("eof")) != -1) {  
+	            sb.append(message.substring(0, index));  
+	            break;  
+	         }  
+	         sb.append(message);  
+	      }
+		messageField.setText(message);
+	}
 	public static void main(String[] args) throws Exception{
 		Client client = new Client();
+		while(true) {
+			client.refreshMessage();
+		}
 		
 	}
 
