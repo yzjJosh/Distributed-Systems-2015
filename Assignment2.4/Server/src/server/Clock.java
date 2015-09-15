@@ -1,10 +1,15 @@
 package server;
 
+import java.io.Serializable;
+
 /**
  * Clock is the logical clock in Lamport's Algorithm. If p1 happened before p2, c1 < c2.
  *
  */
-public class Clock implements Comparable<Clock>{
+public class Clock implements Comparable<Clock>, Serializable{
+
+	private static final long serialVersionUID = 1L;
+	
 	public final long timeStep;  // The time step of Clock.
 	public final int pid;		// The pid of the process.
 	
