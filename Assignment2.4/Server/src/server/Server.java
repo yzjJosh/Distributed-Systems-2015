@@ -10,6 +10,8 @@ import java.util.Map.Entry;
  */
 public class Server {
 	
+	private static String[] seates; //The seates information, each element is a name.
+	private static HashMap<String, Iterable<Integer>> reservedSeates; //Name to reserved seates.
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
 	private static HashMap<Integer, ServerState> clusterInfo; //Pid to every srever's state in the cluster.
@@ -56,7 +58,7 @@ public class Server {
 	 * @return Received message.
 	 * @throws IOException If there is an io error, or does not hear back on time.
 	 */
-	private Message waitForMessage(Socket socket, final int waitTime) throws IOException{
+	private static Message waitForMessage(Socket socket, final int waitTime) throws IOException{
 		final ObjectInputStream istream = new ObjectInputStream(socket.getInputStream()); //Get inputstream from socket.
 		Thread monitor = new Thread(new Runnable(){ // Create a new thread, wait some time and shut down the stream.
 			@Override
