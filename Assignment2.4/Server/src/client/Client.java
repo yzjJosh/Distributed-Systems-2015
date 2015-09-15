@@ -40,12 +40,18 @@ public class Client extends JFrame {
 		JButton btnSearch = new JButton("Search");
 		btnSearch.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
+				Search se = new Search(writer);
 			}
 		});
 		btnSearch.setBounds(66, 128, 117, 65);
 		getContentPane().add(btnSearch);
 		
 		JButton btnDelete = new JButton("Delete");
+		btnDelete.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				Delete de = new Delete(writer);
+			}
+		});
 		btnDelete.setBounds(66, 205, 117, 57);
 		getContentPane().add(btnDelete);
 		
@@ -71,7 +77,10 @@ public class Client extends JFrame {
 		
 		
 	}
-	//Refresh the message from the server
+	/**
+	 * Refresh the message field to show the new message from the server
+	 * @throws IOException when failed to read the message
+	 */
 	public void refreshMessage() throws IOException {
 		StringBuffer sb = new StringBuffer();
 		String message;
