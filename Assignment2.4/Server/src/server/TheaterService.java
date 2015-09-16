@@ -1,5 +1,7 @@
 package server;
 
+import java.util.*;
+
 import exceptions.*;
 
 /**
@@ -7,6 +9,9 @@ import exceptions.*;
  *
  */
 public class TheaterService {
+	
+	private String[] seates; //The seates information, each element is a name.
+	private HashMap<String, Set<Integer>> reservedSeates; //Name to reserved seates.
 	
 	/**
 	 * Reserve certain number of seates for client.
@@ -16,7 +21,7 @@ public class TheaterService {
 	 * @throws NoEnoughSeatesException When there is not enough seats.
 	 * @throws RepeateReservationException When the client has already researved seates.
 	 */
-	public Iterable<Integer> reserve(String name, int count) throws NoEnoughSeatesException, RepeateReservationException{
+	public List<Integer> reserve(String name, int count) throws NoEnoughSeatesException, RepeateReservationException{
 		return null;
 	}
 	
@@ -26,7 +31,7 @@ public class TheaterService {
 	 * @return The result.
 	 * @throws NoReservationInfoException When cannot find information.
 	 */
-	public Iterable<Integer> search(String name) throws NoReservationInfoException{
+	public List<Integer> search(String name) throws NoReservationInfoException{
 		return null;
 	}
 	

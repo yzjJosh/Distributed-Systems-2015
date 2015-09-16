@@ -10,8 +10,6 @@ import java.util.Map.Entry;
  */
 public class Server {
 	
-	private static String[] seates; //The seates information, each element is a name.
-	private static HashMap<String, Iterable<Integer>> reservedSeates; //Name to reserved seates.
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
 	private static HashMap<Integer, ServerState> clusterInfo; //Pid to every srever's state in the cluster.
