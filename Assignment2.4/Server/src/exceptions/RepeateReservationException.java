@@ -1,5 +1,9 @@
 package exceptions;
 
+
+
+
+
 /**
  * This exception is thrown when a client reserve seates repeatly.
  */
@@ -12,7 +16,9 @@ public class RepeateReservationException extends Exception {
 	 * Create an empty exception.
 	 */
 	public RepeateReservationException(){
+		
 		super();
+		
 	}
 	
 	/**

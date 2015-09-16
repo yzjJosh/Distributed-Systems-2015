@@ -13,19 +13,20 @@ import javax.swing.JLabel;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.io.Writer;
 
 public class Delete extends JDialog {
 
 	private final JPanel contentPanel = new JPanel();
 	private JTextField nameField;
-    private Writer writeDelete;
+    private ObjectOutputStream writeDelete;
 
 
 	/**
 	 * Create the dialog.
 	 */
-	public Delete(Writer writer) {
+	public Delete(ObjectOutputStream writer) {
 		writeDelete = writer;
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
@@ -54,7 +55,7 @@ public class Delete extends JDialog {
 					public void actionPerformed(ActionEvent e) {
 						String name = nameField.getText();
 				        try {
-							writeDelete.write(name);
+							writeDelete.writeObject(name);
 							writeDelete.flush();
 						} catch (IOException e1) {
 							e1.printStackTrace();

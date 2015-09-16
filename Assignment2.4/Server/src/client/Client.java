@@ -21,8 +21,8 @@ public class Client extends JFrame {
 	InetAddress host = null;
 	int port = 0;
 	Socket client = null;
-	Writer writer = null;
-	BufferedReader br = null;  //A buffer to store the message from the server
+	ObjectOutputStream writer = null;
+	ObjectInputStream reader = null;  //A buffer to store the message from the server
 
     
 	private JTextField messageField;
@@ -71,28 +71,28 @@ public class Client extends JFrame {
 		host = InetAddress.getLocalHost(); //Get local host IP
 		port = 3333;
 		client = new Socket(host, port);
-		writer = new OutputStreamWriter(client.getOutputStream());
+		writer = new ObjectOutputStream(client.getOutputStream());
 		//Ready to read the server message
-		br = new BufferedReader(new InputStreamReader(client.getInputStream()));
+		reader = new ObjectInputStream(client.getInputStream());
 		
 		
 	}
 	/**
 	 * Refresh the message field to show the new message from the server
 	 * @throws IOException when failed to read the message
+	 * @throws ClassNotFoundException 
 	 */
-	public void refreshMessage() throws IOException {
-		StringBuffer sb = new StringBuffer();
-		String message;
-		int index;  
-	    while ((message=br.readLine()) != null) {  
-	         if ((index = message.indexOf("eof")) != -1) {  
-	            sb.append(message.substring(0, index));  
-	            break;  
-	         }  
-	         sb.append(message);  
-	      }
-		messageField.setText(message);
+	public void refreshMessage() throws IOException, ClassNotFoundException {
+		client.setSoTimeout(5 * 1000); // set the timeout to 5s
+	    String data = "";
+	    try {
+	    	data = (String) reader.readObject();
+	    	messageField.setText(data);
+	    } catch (SocketTimeoutException e) {
+	    	messageField.setText("time is out! Connection to the server is off! \n");
+	    	//Reconnect to a new server
+	    	client.connect(new InetSocketAddress(host, port));
+	    }
 	}
 	public static void main(String[] args) throws Exception{
 		Client client = new Client();
