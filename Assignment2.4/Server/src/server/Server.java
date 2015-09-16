@@ -13,6 +13,8 @@ public class Server {
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
 	private static HashMap<Integer, ServerState> clusterInfo; //Pid to every srever's state in the cluster.
+	private static PriorityQueue<Message> waitingQueue;		  //The queue of waiting requests
+	private static LinkedList<Message> inCriticalSection;	  //Requests that are currently in critical section
 	
 	/**
 	 * Initialize the server process with an info file.
