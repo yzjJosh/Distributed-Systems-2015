@@ -12,8 +12,8 @@ public class Server {
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
 	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
-	private static final PriorityQueue<Message> waitingQueue = new PriorityQueue<Message>();		  //The queue of waiting requests
-	private static final LinkedList<Message> inCriticalSection = new LinkedList<Message>();	  //Requests that are currently in critical section
+	private static final PriorityQueue<Message> readRequests = new PriorityQueue<Message>();		  //The queue of waiting read requests
+	private static final PriorityQueue<Message> writeRequests = new PriorityQueue<Message>();	  		//The queue of waiting write requests
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
@@ -62,6 +62,7 @@ public class Server {
 	 * @return The up to date clock.
 	 */
 	private static Clock updateClock(Clock timestep){
+		if(timestep == null) return clock;
 		synchronized(clock_lock){
 			//Enter critical section.
 			clock = new Clock(Math.max(clock.timeStep, timestep.timeStep)+1, clock.pid);
@@ -71,14 +72,14 @@ public class Server {
 	}
 
 	/**
-	 * Send a message and update the clock(increase the timestep by 1) at the same time.
-	 * @param msg The message to send.
-	 * @param socket The socket to send that message.
-	 * @throws IOException If there is an io error when sending message.
+	 * Send a timestped message through a socket, and update the clock at the same time.
+	 * @param socket The socket to send message
+	 * @param type The type of message
+	 * @param content The content of message
+	 * @throws IOException If some io errors occur
 	 */
-	private static void sendMessage(Message msg, Socket socket) throws IOException{
-		updateClock();
-		new ObjectOutputStream(socket.getOutputStream()).writeObject(msg);
+	private static void sendMessage(Socket socket, MessageType type, Serializable content) throws IOException{
+		new ObjectOutputStream(socket.getOutputStream()).writeObject(new Message(type, content, updateClock()));
 	}
 	
 	/**
@@ -108,7 +109,7 @@ public class Server {
 			e.printStackTrace();
 			System.exit(-1);
 		}
-		if(msg.content instanceof Clock) updateClock((Clock) msg.content); //Update the clock.
+		updateClock(msg.clk); //Update the clock.
 		monitor.interrupt(); // Stop the monitor from waiting.
 		return msg;
 	}
@@ -123,7 +124,7 @@ public class Server {
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
 	public static void onReceivingMessage(Message msg, Socket socket) throws IOException{
-		if(msg.content instanceof Clock) updateClock((Clock) msg.content); //Update the clock firstly.
+		updateClock(msg.clk); //Update the clock firstly.
 		
 		
 	}
@@ -136,8 +137,7 @@ public class Server {
 			if(!serverstat.live || serverstat.pid == pid) continue;
 			try {
 				Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
-				updateClock();
-				new ObjectOutputStream(socket.getOutputStream()).writeObject(clock);
+				sendMessage(socket, MessageType.CLOCK_MESSAGE, null);
 				socket.close();
 			} catch (UnknownHostException e) {
 			} catch (IOException e) {
