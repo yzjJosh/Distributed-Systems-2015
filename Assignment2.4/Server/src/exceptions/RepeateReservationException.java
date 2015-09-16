@@ -11,7 +11,7 @@ public class RepeateReservationException extends Exception {
 
 	
 	private static final long serialVersionUID = 1L;
-	
+
 	/**
 	 * Create an empty exception.
 	 */

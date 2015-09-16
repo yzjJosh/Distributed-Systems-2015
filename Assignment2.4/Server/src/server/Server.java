@@ -31,8 +31,30 @@ public class Server {
 	 * Request critial section access. If critial section is unavailable, block the thread until it becomes available.
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void requestCritialSection() throws IOException{
-		
+	private static void requestCritialSection(Message message) throws IOException {
+		// If the process is the first one in the reader queue
+		if (message.type == MessageType.CS_REQUEST_READ) {
+			while(!writeRequests.isEmpty()){        //writeRequest queue is not empty, so it has to wait
+				try {
+					Thread.currentThread().wait();
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+			}
+			return;              //After it's notified and satisfies the requirements, it can enter the cs.
+		}else if (message.type == MessageType.CS_REQUEST_WRITE && pid == writeRequests.peek().clk.pid) {  //it's a write thread and is the first thread in the queue
+			if(readRequests.isEmpty()){                 //The read queue is empty so it can directly enter the cs.
+				return;
+			}
+			while(message.clk.timestamp >= readRequests.peek().clk.timestamp){   //If its timestamp is larger than or equal to the first read thread, it's hung up
+				try {
+					Thread.currentThread().wait();
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+			}
+			return;         //After it's notified and satisfies the requirements, it can enter the cs.
+		}
 	}
 	
 	/**
@@ -44,28 +66,29 @@ public class Server {
 	}
 	
 	/**
-	 * Update the logical clock, increase the timestep of this process by 1.
+	 * Update the logical clock, increase the timestamp of this process by 1.
 	 * @return The up to date clock.
 	 */
 	private static Clock updateClock(){
 		synchronized(clock_lock){
 			//Enter critical section.
-			clock = new Clock(clock.timeStep+1, clock.pid);
+			clock = new Clock(clock.timestamp+1, clock.pid);
+			
 			//Release critical section.
 		}
 		return clock;
 	}
 	
 	/**
-	 * Update the logical clock of this process according to a recerived timestep.
-	 * @param timestep The timestep of a message.
+	 * Update the logical clock of this process according to a recerived timestamp.
+	 * @param timestamp The timestamp of a message.
 	 * @return The up to date clock.
 	 */
-	private static Clock updateClock(Clock timestep){
-		if(timestep == null) return clock;
+	private static Clock updateClock(Clock timestamp){
+		if(timestamp == null) return clock;
 		synchronized(clock_lock){
 			//Enter critical section.
-			clock = new Clock(Math.max(clock.timeStep, timestep.timeStep)+1, clock.pid);
+			clock = new Clock(Math.max(clock.timestamp, timestamp.timestamp)+1, clock.pid);
 			//Release critical section.
 		}
 		return clock;
@@ -125,12 +148,18 @@ public class Server {
 	 */
 	public static void onReceivingMessage(Message msg, Socket socket) throws IOException{
 		updateClock(msg.clk); //Update the clock firstly.
+		switch(msg.type) {      //Add the message into the corresponding queue.
+		case ACKNOWLEDGE_READ: 
+			readRequests.add(msg);
+		case ACKNOWLEDGE_WRITE:
+			writeRequests.add(msg);
+		}
 		
 		
 	}
 	
 	/**
-	 * Send the timesteped message to all other servers.
+	 * Send the timestamped message to all other servers.
 	 */
 	public static void broadCastClock(){
 		for(ServerState serverstat : clusterInfo.values()){
@@ -159,6 +188,7 @@ public class Server {
 			
 		} catch (IOException e) {
 			e.printStackTrace();
+			
 		}
 		
 	}

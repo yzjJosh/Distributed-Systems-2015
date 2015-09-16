@@ -1,6 +1,7 @@
 package client;
 import java.io.*;
 import java.net.*;
+import java.util.HashMap;
 
 import javax.swing.JFrame;
 import javax.swing.JButton;
@@ -16,6 +17,7 @@ import javax.swing.JTextField;
 
 import server.ClockUpdateThread;
 import server.Server;
+import server.ServerState;
 import server.ServerThread;
 public class Client extends JFrame {
 	InetAddress host = null;
@@ -23,9 +25,12 @@ public class Client extends JFrame {
 	Socket client = null;
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
-
-    
+	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
+    private static final int numOfServers;
 	private JTextField messageField;
+	public void ReadServerInfo(String path){
+		
+	}
 	public Client() throws Exception {
 		getContentPane().setLayout(null);
 		JButton btnReservation = new JButton("Reservation");

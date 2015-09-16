@@ -1,7 +1,7 @@
 package server;
 
 /**
- * ClockUpdateThread is a thread witch peiodically sends a timesteped message to all other processes.
+ * ClockUpdateThread is a thread witch peiodically sends a timestamped message to all other processes.
  *
  */
 public class ClockUpdateThread extends Thread {

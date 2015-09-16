@@ -29,7 +29,7 @@ public class Message implements Serializable, Comparable<Message> {
 	
 	private static final long serialVersionUID = 1L;
 	public final MessageType type; 			//The type of this message. Different types are defined above.
-	public final Clock clk;					//The timestep of the sent process. If message is sent from client, this field should be null.
+	public final Clock clk;					//The timestamp of the sent process. If message is sent from client, this field should be null.
 	public final Serializable content;		//The content of this message.
 	
 	/**
