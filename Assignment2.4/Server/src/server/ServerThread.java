@@ -27,15 +27,6 @@ public class ServerThread extends Thread {
 			while(true){
 				Message msg = (Message) istream.readObject();
 				Server.onReceivingMessage(msg, socket);
-				ThreadGroup group = Thread.currentThread().getThreadGroup();
-				ThreadGroup topGroup = group;
-				while (group != null) {
-					topGroup = group;
-					group = group.getParent();
-				}
-				topGroup.activeCount();
-			    
-				
 			}
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();

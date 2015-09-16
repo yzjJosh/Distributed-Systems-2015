@@ -3,7 +3,6 @@ package server;
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import java.util.Map.Entry;
 
 /**
  * A server process in a distributed system.
@@ -12,9 +11,12 @@ public class Server {
 	
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
-	private static HashMap<Integer, ServerState> clusterInfo; //Pid to every srever's state in the cluster.
-	private static PriorityQueue<Message> waitingQueue;		  //The queue of waiting requests
-	private static LinkedList<Message> inCriticalSection;	  //Requests that are currently in critical section
+	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
+	private static final PriorityQueue<Message> waitingQueue = new PriorityQueue<Message>();		  //The queue of waiting requests
+	private static final LinkedList<Message> inCriticalSection = new LinkedList<Message>();	  //Requests that are currently in critical section
+	
+	//Synchronization locks
+	private static Object clock_lock = new Object();	//clock access mutex lock
 	
 	/**
 	 * Initialize the server process with an info file.
@@ -40,15 +42,43 @@ public class Server {
 	private static void releaseCritialSection() throws IOException{
 		
 	}
-
+	
+	/**
+	 * Update the logical clock, increase the timestep of this process by 1.
+	 * @return The up to date clock.
+	 */
+	private static Clock updateClock(){
+		synchronized(clock_lock){
+			//Enter critical section.
+			clock = new Clock(clock.timeStep+1, clock.pid);
+			//Release critical section.
+		}
+		return clock;
+	}
 	
 	/**
 	 * Update the logical clock of this process according to a recerived timestep.
-	 * @param timestep The timestep of a message. If the timestep is null, this method increases the logical clock by 1.
+	 * @param timestep The timestep of a message.
 	 * @return The up to date clock.
 	 */
 	private static Clock updateClock(Clock timestep){
-		return null;
+		synchronized(clock_lock){
+			//Enter critical section.
+			clock = new Clock(Math.max(clock.timeStep, timestep.timeStep)+1, clock.pid);
+			//Release critical section.
+		}
+		return clock;
+	}
+
+	/**
+	 * Send a message and update the clock(increase the timestep by 1) at the same time.
+	 * @param msg The message to send.
+	 * @param socket The socket to send that message.
+	 * @throws IOException If there is an io error when sending message.
+	 */
+	private static void sendMessage(Message msg, Socket socket) throws IOException{
+		updateClock();
+		new ObjectOutputStream(socket.getOutputStream()).writeObject(msg);
 	}
 	
 	/**
@@ -78,6 +108,7 @@ public class Server {
 			e.printStackTrace();
 			System.exit(-1);
 		}
+		if(msg.content instanceof Clock) updateClock((Clock) msg.content); //Update the clock.
 		monitor.interrupt(); // Stop the monitor from waiting.
 		return msg;
 	}
@@ -92,15 +123,26 @@ public class Server {
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
 	public static void onReceivingMessage(Message msg, Socket socket) throws IOException{
+		if(msg.content instanceof Clock) updateClock((Clock) msg.content); //Update the clock firstly.
+		
 		
 	}
 	
 	/**
-	 * Get the Lamport's logical clock of this process.
-	 * @return The current logical clock of this process.
+	 * Send the timesteped message to all other servers.
 	 */
-	public static Clock getClock(){
-		return clock;
+	public static void broadCastClock(){
+		for(ServerState serverstat : clusterInfo.values()){
+			if(!serverstat.live || serverstat.pid == pid) continue;
+			try {
+				Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
+				updateClock();
+				new ObjectOutputStream(socket.getOutputStream()).writeObject(clock);
+				socket.close();
+			} catch (UnknownHostException e) {
+			} catch (IOException e) {
+			}
+		}
 	}
 	
 	/**

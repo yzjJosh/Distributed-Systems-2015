@@ -20,8 +20,7 @@ public class ClockUpdateThread extends Thread {
 	public void run(){
 		try {
 			while(true){
-				//Broadcast(TYPE_CLOCK_MESSAGE, new Message(Server.getClock()), pid);
-				
+				Server.broadCastClock();				
 				Thread.sleep(period);
 			}
 		} catch (InterruptedException e) {
