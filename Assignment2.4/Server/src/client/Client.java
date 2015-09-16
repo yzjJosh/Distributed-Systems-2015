@@ -26,10 +26,10 @@ public class Client extends JFrame {
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
 	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
-    private static final int numOfServers;
+    private static int numOfServers = 0;
 	private JTextField messageField;
 	public void ReadServerInfo(String path){
-		
+	
 	}
 	public Client() throws Exception {
 		getContentPane().setLayout(null);

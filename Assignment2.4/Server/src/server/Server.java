@@ -36,7 +36,8 @@ public class Server {
 		if (message.type == MessageType.CS_REQUEST_READ) {
 			while(!writeRequests.isEmpty()){        //writeRequest queue is not empty, so it has to wait
 				try {
-					Thread.currentThread().wait();
+					Thread.currentThread();
+					Thread.sleep(5 * 1000);
 				} catch (InterruptedException e) {
 					e.printStackTrace();
 				}
@@ -48,7 +49,8 @@ public class Server {
 			}
 			while(message.clk.timestamp >= readRequests.peek().clk.timestamp){   //If its timestamp is larger than or equal to the first read thread, it's hung up
 				try {
-					Thread.currentThread().wait();
+					Thread.currentThread();
+					Thread.sleep(5 * 1000);
 				} catch (InterruptedException e) {
 					e.printStackTrace();
 				}
@@ -61,7 +63,12 @@ public class Server {
 	 * Release the critial section, so that other server processes can enter the critial section.
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void releaseCritialSection() throws IOException{
+	private static void releaseCritialSection(Message message) throws IOException{
+		if(message.type == MessageType.CS_REQUEST_READ) {
+			readRequests.poll();
+		}else {
+			writeRequests.poll();
+		}
 		
 	}
 	
