@@ -20,16 +20,33 @@ import server.Server;
 import server.ServerState;
 import server.ServerThread;
 public class Client extends JFrame {
-	InetAddress host = null;
-	int port = 0;
 	Socket client = null;
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
 	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
     private static int numOfServers = 0;
 	private JTextField messageField;
-	public void ReadServerInfo(String path){
+	private RandomAccessFile serversInfo = null;
 	
+	private String host = null;
+	private int port = 0;
+	public void ReadServerInfo(String path){
+		try {
+			serversInfo = new RandomAccessFile(path, "r");
+			String server;
+			try {
+				server = serversInfo.readLine();
+				String[] splits = server.split(" ");
+			    host = splits[0];
+			    port = Integer.parseInt(splits[1]);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+				
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
 	}
 	public Client() throws Exception {
 		getContentPane().setLayout(null);
@@ -73,8 +90,6 @@ public class Client extends JFrame {
 		lblFromServerSystem.setBounds(243, 78, 147, 16);
 		getContentPane().add(lblFromServerSystem);
 		//Initialize the socket
-		host = InetAddress.getLocalHost(); //Get local host IP
-		port = 3333;
 		client = new Socket(host, port);
 		writer = new ObjectOutputStream(client.getOutputStream());
 		//Ready to read the server message
