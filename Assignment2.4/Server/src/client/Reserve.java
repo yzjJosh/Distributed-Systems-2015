@@ -13,6 +13,7 @@ import javax.swing.JLabel;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.io.Writer;
 
 public class Reserve extends JDialog {
@@ -20,18 +21,18 @@ public class Reserve extends JDialog {
 	private final JPanel contentPanel = new JPanel();
 	private JTextField nameField;
 	private JTextField countField;
-    private Writer writeReserve;
+    private ObjectOutputStream writeReserve;
 	/**
 	 * Create the dialog.
 	 */
-	public Reserve(Writer writer) {
+	public Reserve(ObjectOutputStream writer) {
 		writeReserve = writer;
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
 		contentPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
 		getContentPane().add(contentPanel, BorderLayout.CENTER);
 		contentPanel.setLayout(null);
-		
+	
 		nameField = new JTextField();
 		nameField.setBounds(200, 66, 134, 28);
 		contentPanel.add(nameField);
@@ -61,8 +62,8 @@ public class Reserve extends JDialog {
 						String name = nameField.getText();
 						int count = Integer.parseInt(countField.getText());
 				        try {
-							writeReserve.write(name);
-							writeReserve.write(count);
+							writeReserve.writeObject(name);
+							writeReserve.writeObject(count);
 							writeReserve.flush();
 						} catch (IOException e1) {
 							e1.printStackTrace();

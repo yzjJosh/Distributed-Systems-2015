@@ -11,6 +11,7 @@ import javax.swing.border.EmptyBorder;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.io.Writer;
 
 import javax.swing.JTextField;
@@ -20,12 +21,12 @@ public class Search extends JDialog {
 
 	private final JPanel contentPanel = new JPanel();
 	private JTextField nameField;
-    private Writer writeSearch;
+    private ObjectOutputStream writeSearch;
 
 	/**
 	 * Create the dialog.
 	 */
-	public Search(Writer writer) {
+	public Search(ObjectOutputStream writer) {
 		writeSearch = writer;
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
@@ -53,7 +54,7 @@ public class Search extends JDialog {
 					public void actionPerformed(ActionEvent e) {
 						String name = nameField.getText();
 				        try {
-							writeSearch.write(name);
+							writeSearch.writeObject(name);
 							writeSearch.flush();
 						} catch (IOException e1) {
 							e1.printStackTrace();
