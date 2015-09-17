@@ -17,7 +17,7 @@ public class Server {
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
-	private static Object write_lock = new Object();	//Write access mutex lock
+	private static Semaphore read_write_lock = new Semaphore(20);	//The read-write lock
 	private static RandomAccessFile serversInfo;
 	
 	/**
@@ -73,6 +73,9 @@ public class Server {
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
 	private static void requestCritialSection(boolean read) throws IOException {
+		//Acquire lock firstly
+		if(read) read_write_lock.acquire();
+		else for(int i=0; i<20; i++) read_write_lock.acquire();
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
 		final Clock timestampOfRequest = updateClock();
@@ -107,7 +110,7 @@ public class Server {
 						} catch (UnknownHostException e) {
 						} catch (IOException e) {
 							synchronized(clusterInfo){
-								clusterInfo.get(stat.pid).live = false;	//If no response, set it dead.
+								stat.live = false;	//If no response, set it dead.
 							}
 						}
 						//After receive the ACK or set the server dead, lock.num--.
@@ -120,16 +123,16 @@ public class Server {
 			}
 		}
 		
-		//----------------------------------------------------------------------------------------------------------------
-		//If enter this line, then all acks of live servers have been received
 		while(ackLock.num > 0)
 			try {
 				Thread.sleep(1000);	//If have not received enough ack, sleep.
 			} catch (InterruptedException e) {}
+		//---------------------------------------------------------------------------------------------------------------
+		//If enter this line, then congratulations! You have received acks from all lived servers
+		
 		if (read) {
-			
-			//writeRequest queue is not empty, so it has to wait
-			while(!writeRequests.isEmpty()){       
+			//writeRequest queue is not empty and there is at least one write request whose timestamp is smaller, so it has to wait
+			while(!writeRequests.isEmpty() && writeRequests.peek().clk.compareTo(timestampOfRequest) < 0){       
 				try {
 					Thread.currentThread();
 					Thread.sleep(5 * 1000);
@@ -164,6 +167,11 @@ public class Server {
 			}
 			return;         //After it's notified and satisfies the requirements, it can enter the cs.
 		}
+		
+		if(read) read_write_lock.release();
+		else 
+			for(int i=0; i<20; i++)
+				read_write_lock.release();
 	}
 	
 	/**
