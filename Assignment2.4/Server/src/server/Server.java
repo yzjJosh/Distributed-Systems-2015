@@ -3,7 +3,6 @@ package server;
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import java.util.concurrent.TimeoutException;
 
 /**
  * A server process in a distributed system.
@@ -69,22 +68,63 @@ public class Server {
 	
 	/**
 	 * Request critial section access. If critial section is unavailable, block the thread until it becomes available.
+	 * @param read true if read, false if write
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void requestCritialSection(Message message) throws IOException {
-		
-		if (message.type == MessageType.CS_REQUEST_READ) {
-			//Send the read requests to all other servers
+	private static void requestCritialSection(boolean read) throws IOException {
+		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
+		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
+		class Lock{			
+			/**
+			 * The lock is used for synchronization purpose.
+			 * Whenever send a request, num++;
+			 * Whenever receive a ack or a server is believed to be dead, num--;
+			 * The main thread will wait until num==0. 
+			 */
+			public int num = 0;
+		}
+		final Lock ackLock = new Lock();
+		final Thread mainThread = Thread.currentThread();
+		//Send the read requests to all other servers
+		synchronized(clusterInfo){ //No two threads can take clusterInfo's lock at the same time.
 			for(ServerState serverstat : clusterInfo.values()){
 				if(!serverstat.live || serverstat.pid == pid) continue;
-				try {
-					Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
-					sendMessage(socket, MessageType.CS_REQUEST_READ, null);
-					socket.close();
-				} catch (UnknownHostException e) {
-				} catch (IOException e) {
+				final ServerState stat = serverstat;
+				synchronized(ackLock){
+					ackLock.num ++;	//Send a request, lock.num++.
 				}
+				new Thread(){
+					@Override
+					public void run(){
+						try {
+							Socket socket = new Socket(stat.ipAddress, stat.port);
+							sendMessage(socket, type, null);	//Send request to a server
+							while(waitForMessage(socket, 5000).type != ackType);	//Wait for its ack reply for 5s.
+							socket.close();
+						} catch (UnknownHostException e) {
+						} catch (IOException e) {
+							synchronized(clusterInfo){
+								clusterInfo.get(stat.pid).live = false;	//If no response, set it dead.
+							}
+						}
+						//After receive the ACK or set the server dead, lock.num--.
+						synchronized(ackLock){
+							ackLock.num--;
+							mainThread.interrupt();
+						}
+					}
+				}.start();
 			}
+		}
+		
+		//----------------------------------------------------------------------------------------------------------------
+		//If enter this line, then all acks of live servers have been received
+		while(ackLock.num > 0)
+			try {
+				Thread.sleep(1000);	//If have not received enough ack, sleep.
+			} catch (InterruptedException e) {}
+		if (read) {
+			
 			//writeRequest queue is not empty, so it has to wait
 			while(!writeRequests.isEmpty()){       
 				try {
@@ -176,14 +216,14 @@ public class Server {
 	}
 
 	/**
-	 * Send a timestped message through a socket, and update the clock at the same time.
+	 * Send a timestped message through a socket
 	 * @param socket The socket to send message
 	 * @param type The type of message
 	 * @param content The content of message
 	 * @throws IOException If some io errors occur
 	 */
 	private static void sendMessage(Socket socket, MessageType type, Serializable content) throws IOException{
-		new ObjectOutputStream(socket.getOutputStream()).writeObject(new Message(type, content, updateClock()));
+		new ObjectOutputStream(socket.getOutputStream()).writeObject(new Message(type, content, clock));
 	}
 	
 	/**
@@ -195,7 +235,7 @@ public class Server {
 	 */
 	private static Message waitForMessage(Socket socket, final int waitTime) throws IOException{
 		final ObjectInputStream istream = new ObjectInputStream(socket.getInputStream()); //Get inputstream from socket.
-		Thread monitor = new Thread(new Runnable(){ // Create a new thread, wait some time and shut down the stream.
+		Thread monitor = new Thread(){ // Create a new thread, wait some time and shut down the stream.
 			@Override
 			public void run() {
 				try {
@@ -204,7 +244,7 @@ public class Server {
 				} catch (InterruptedException e) {}
 				catch(IOException e){}	
 			}
-		});
+		};
 		monitor.start(); // Start the new thread.
 		Message msg = null;
 		try {
