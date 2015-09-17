@@ -3,6 +3,7 @@ package server;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A server process in a distributed system.
@@ -17,14 +18,53 @@ public class Server {
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
+	private static RandomAccessFile serversInfo;
 	
 	/**
 	 * Initialize the server process with an info file.
 	 * @param infoFile The file where ips and ports are defined.
 	 * @throws IOException If there is an error when reading the file.
 	 */
-	private static void init(String infoFile) throws IOException{
-		
+	private static void init(String path) throws IOException {
+		try {
+
+			BufferedReader br = new BufferedReader(new FileReader(path));
+			StringBuffer sb = new StringBuffer();
+			String server = br.readLine();
+			while (server != null) {
+				// Extract the ip and port information from the line.
+				String[] splits = server.split(" ");
+				String ip = splits[0];
+				int port = Integer.parseInt(splits[1]);
+				// Try to find out if the server is alive by sending an ack and
+				// check if the sender server can receive a response in time.
+				try {
+					Socket socket = new Socket(ip, port);
+					socket.setSoTimeout(5 * 1000); // set the timeout to 5s
+					sendMessage(socket, MessageType.SERVER_SYNC, null);
+					ObjectInputStream reader = new ObjectInputStream(
+							socket.getInputStream());
+					reader.readObject();
+					socket.close();
+					// Timeout Exception doesn't happen, so this server is
+					// alive.
+					ServerState state = new ServerState(pid, ip, port, true);
+					clusterInfo.put(pid, state);
+				} catch (UnknownHostException e) {
+				} catch (SocketTimeoutException e) {
+					// Timeout Exception happens, so this server is not alive
+					ServerState state = new ServerState(pid, ip, port, false);
+					clusterInfo.put(pid, state);
+				} catch (ClassNotFoundException e) {
+					e.printStackTrace();
+				}
+				// Read the next server information.
+				br.readLine();
+
+			}
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
 	}
 	
 	/**
@@ -32,9 +72,21 @@ public class Server {
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
 	private static void requestCritialSection(Message message) throws IOException {
-		// If the process is the first one in the reader queue
+		
 		if (message.type == MessageType.CS_REQUEST_READ) {
-			while(!writeRequests.isEmpty()){        //writeRequest queue is not empty, so it has to wait
+			//Send the read requests to all other servers
+			for(ServerState serverstat : clusterInfo.values()){
+				if(!serverstat.live || serverstat.pid == pid) continue;
+				try {
+					Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
+					sendMessage(socket, MessageType.CS_REQUEST_READ, null);
+					socket.close();
+				} catch (UnknownHostException e) {
+				} catch (IOException e) {
+				}
+			}
+			//writeRequest queue is not empty, so it has to wait
+			while(!writeRequests.isEmpty()){       
 				try {
 					Thread.currentThread();
 					Thread.sleep(5 * 1000);
@@ -44,6 +96,18 @@ public class Server {
 			}
 			return;              //After it's notified and satisfies the requirements, it can enter the cs.
 		}else if (message.type == MessageType.CS_REQUEST_WRITE && pid == writeRequests.peek().clk.pid) {  //it's a write thread and is the first thread in the queue
+			//Send the write requests to all other servers
+			for(ServerState serverstat : clusterInfo.values()){
+				if(!serverstat.live || serverstat.pid == pid) continue;
+				try {
+					Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
+					sendMessage(socket, MessageType.CS_REQUEST_WRITE, null);
+					socket.close();
+				} catch (UnknownHostException e) {
+				} catch (IOException e) {
+				}
+			}
+			
 			if(readRequests.isEmpty()){                 //The read queue is empty so it can directly enter the cs.
 				return;
 			}
@@ -66,6 +130,16 @@ public class Server {
 	private static void releaseCritialSection(Message message) throws IOException{
 		if(message.type == MessageType.CS_REQUEST_READ) {
 			readRequests.poll();
+			for(ServerState serverstat : clusterInfo.values()){
+				if(!serverstat.live || serverstat.pid == pid) continue;
+				try {
+					Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
+					sendMessage(socket, MessageType.CS_RELEASE, null);
+					socket.close();
+				} catch (UnknownHostException e) {
+				} catch (IOException e) {
+				}
+			}
 		}else {
 			writeRequests.poll();
 		}

@@ -24,12 +24,15 @@ public class Client extends JFrame {
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
 	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
-    private static int numOfServers = 0;
 	private JTextField messageField;
 	private RandomAccessFile serversInfo = null;
 	
 	private String host = null;
 	private int port = 0;
+	/**
+	 * Read a random server information from the specified file
+	 * @param path
+	 */
 	public void ReadServerInfo(String path){
 		try {
 			serversInfo = new RandomAccessFile(path, "r");
@@ -48,6 +51,10 @@ public class Client extends JFrame {
 			e.printStackTrace();
 		}
 	}
+	/**
+	 * Constructor
+	 * @throws Exception
+	 */
 	public Client() throws Exception {
 		getContentPane().setLayout(null);
 		JButton btnReservation = new JButton("Reservation");
@@ -111,11 +118,13 @@ public class Client extends JFrame {
 	    } catch (SocketTimeoutException e) {
 	    	messageField.setText("time is out! Connection to the server is off! \n");
 	    	//Reconnect to a new server
+	    	ReadServerInfo("ServersInfo.txt");
 	    	client.connect(new InetSocketAddress(host, port));
 	    }
 	}
 	public static void main(String[] args) throws Exception{
 		Client client = new Client();
+		client.ReadServerInfo("ServersInfo.txt");
 		while(true) {
 			client.refreshMessage();
 		}
