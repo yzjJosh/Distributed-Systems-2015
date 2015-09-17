@@ -17,6 +17,7 @@ public class Server {
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
+	private static Object write_lock = new Object();	//Write access mutex lock
 	private static RandomAccessFile serversInfo;
 	
 	/**
@@ -74,6 +75,7 @@ public class Server {
 	private static void requestCritialSection(boolean read) throws IOException {
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
+		final Clock timestampOfRequest = updateClock();
 		class Lock{			
 			/**
 			 * The lock is used for synchronization purpose.
@@ -98,7 +100,8 @@ public class Server {
 					public void run(){
 						try {
 							Socket socket = new Socket(stat.ipAddress, stat.port);
-							sendMessage(socket, type, null);	//Send request to a server
+							updateClock();
+							sendMessage(socket, new Message(type, null, timestampOfRequest));	//Send request to a server
 							while(waitForMessage(socket, 5000).type != ackType);	//Wait for its ack reply for 5s.
 							socket.close();
 						} catch (UnknownHostException e) {
@@ -191,13 +194,13 @@ public class Server {
 	 * @return The up to date clock.
 	 */
 	private static Clock updateClock(){
+		Clock ret = null;
 		synchronized(clock_lock){
 			//Enter critical section.
-			clock = new Clock(clock.timestamp+1, clock.pid);
-			
+			ret = clock = new Clock(clock.timestamp+1, clock.pid);
 			//Release critical section.
 		}
-		return clock;
+		return ret;
 	}
 	
 	/**
@@ -206,24 +209,24 @@ public class Server {
 	 * @return The up to date clock.
 	 */
 	private static Clock updateClock(Clock timestamp){
-		if(timestamp == null) return clock;
+		Clock ret = null;
 		synchronized(clock_lock){
 			//Enter critical section.
-			clock = new Clock(Math.max(clock.timestamp, timestamp.timestamp)+1, clock.pid);
+			if(timestamp == null) ret = clock;
+			else
+				ret = clock = new Clock(Math.max(clock.timestamp, timestamp.timestamp)+1, clock.pid);
 			//Release critical section.
 		}
-		return clock;
+		return ret;
 	}
 
 	/**
-	 * Send a timestped message through a socket
-	 * @param socket The socket to send message
-	 * @param type The type of message
-	 * @param content The content of message
+	 * Send a message through a socket
+	 * @param msg The message to send
 	 * @throws IOException If some io errors occur
 	 */
-	private static void sendMessage(Socket socket, MessageType type, Serializable content) throws IOException{
-		new ObjectOutputStream(socket.getOutputStream()).writeObject(new Message(type, content, clock));
+	private static void sendMessage(Socket socket, Message msg) throws IOException{
+		new ObjectOutputStream(socket.getOutputStream()).writeObject(msg);
 	}
 	
 	/**
@@ -287,7 +290,7 @@ public class Server {
 			if(!serverstat.live || serverstat.pid == pid) continue;
 			try {
 				Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
-				sendMessage(socket, MessageType.CLOCK_MESSAGE, null);
+				sendMessage(socket, new Message(MessageType.CLOCK_MESSAGE, null, updateClock()));
 				socket.close();
 			} catch (UnknownHostException e) {
 			} catch (IOException e) {
