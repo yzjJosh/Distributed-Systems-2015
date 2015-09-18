@@ -5,6 +5,9 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 
+import exceptions.NoEnoughSeatsException;
+import exceptions.NoReservationInfoException;
+import exceptions.RepeateReservationException;
 import message.*;
 
 /**
@@ -22,7 +25,7 @@ public class Server {
 	private static Object clock_lock = new Object();	//clock access mutex lock
 	private static final int MAX_READER_IN_A_SERVER = 20;	//Maximum number of concurent readers in each server.
 	private static Semaphore read_write_lock = new Semaphore(MAX_READER_IN_A_SERVER);	//The read-write lock
-	
+	private static TheaterService service = new TheaterService(pid);
 	
 	/**
 	 * Initialize the server process with an info file.
@@ -76,7 +79,7 @@ public class Server {
 	 * @param read true if read, false if write
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void requestCritialSection(boolean read) throws IOException {
+	private static void requestCriticalSection(boolean read) throws IOException {
 		//Acquire lock firstly
 		try {
 			if(read) read_write_lock.acquire();
@@ -84,7 +87,7 @@ public class Server {
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
 		}
-		
+	
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
 		final Message msg = new Message(type, null, updateClock());	//The request message
@@ -164,7 +167,7 @@ public class Server {
 	 * Release the critial section, so that other server processes can enter the critial section.
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void releaseCritialSection() throws IOException{
+	private static void releaseCriticalSection() throws IOException{
 		boolean write = false;
 		synchronized(requests){
 			//Remove its request from the queue firstly
@@ -223,14 +226,14 @@ public class Server {
 		switch(msg.type) {      //Add the message into the corresponding queue.
 		case CS_REQUEST_READ: 
 			//When receive the read request, add the request to the queue, then send back an acknowledgement.
-			synchronized(requests){
+			synchronized(requests) {
 				requests.add(msg);
 			}
 			link.writeObject(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
 			break;
 		case CS_REQUEST_WRITE:
 			//When receive the write request, add the request to the queue and write queue, then send back an acknowledgement.
-			synchronized(requests){
+			synchronized(requests) {
 				requests.add(msg);
 				writeRequests.add(msg);
 			}
@@ -238,12 +241,59 @@ public class Server {
 			break;
 		case CS_RELEASE:
 			//When receive release request, remove the request from the queue
-			synchronized(requests){
+			synchronized(requests) {
 				if(requests.poll().type == MessageType.CS_REQUEST_WRITE)
 					writeRequests.poll();
 				requests.notifyAll();
 			}
 			break;
+		case RESERVE_SEAT:    //When receiving a reserve request, to execute the following service.
+			//enter cs
+			requestCriticalSection(false);
+			String[] contents = ((String) msg.content).split(" ");
+			try {
+				//Reservation is successful
+				Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
+				link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT,  (Serializable) seats, null));
+			} catch (NumberFormatException e) {
+				
+			} catch (NoEnoughSeatsException e) {
+				//There is not enough seats
+				link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+			} catch (RepeateReservationException e) {
+				//The reservation is repeated
+				link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+			}
+			//release cs
+			releaseCriticalSection();
+			break;
+		case SEARCH_SEAT:
+			//Enter cs as a reader
+			requestCriticalSection(true);
+			try {
+				Set <Integer> seats = service.search((String)msg.content);
+				link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
+			} catch (NoReservationInfoException e) {
+				link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+			}
+			//Leave cs
+			releaseCriticalSection();
+			break;
+		case DELETE_SEAT:
+			//Enter cs as  a writer
+			requestCriticalSection(false);
+			try {
+				//num = the number of the released seats
+				int num = service.delete((String)msg.content);
+				link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
+			} catch (NoReservationInfoException e) {
+				link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+			}
+			//Leave cs
+			releaseCriticalSection();
+			break;
+			
+			
 		    default:
 			break;
 		}
@@ -336,7 +386,7 @@ public class Server {
 		}
 		for(int i=0; i<1000; i++){
 			try {			
-					requestCritialSection(false);
+					requestCriticalSection(false);
 					File testFile = new File("E:\\USA\\courses\\Distributed System\\test\\test.txt");
 					BufferedReader br = new BufferedReader(new FileReader(testFile));
 					int read = Integer.parseInt(br.readLine());
@@ -346,7 +396,7 @@ public class Server {
 					BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
 					writer.write(""+(read+1));
 					writer.close();
-					releaseCritialSection();	
+					releaseCriticalSection();	
 			} catch (IOException e) {
 				e.printStackTrace();
 			}

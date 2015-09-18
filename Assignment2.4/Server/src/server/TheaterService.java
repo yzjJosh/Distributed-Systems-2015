@@ -28,8 +28,8 @@ public class TheaterService {
 	 * @throws NoEnoughSeatesException When there is no enough seats.
 	 * @throws RepeateReservationException When the client has already reserved seats.
 	 */
-	public Set<Integer> reserve(String name, int count) throws NoEnoughSeatesException, RepeateReservationException{
-
+	public Set<Integer> reserve(String name, int count) throws NoEnoughSeatsException, RepeateReservationException{
+		
 		Set<Integer> set = new HashSet <Integer> ();
 		//If the client has already reserved seats, then throws an exception
 		if(reservedSeats.containsKey(name)) {
@@ -37,7 +37,7 @@ public class TheaterService {
 		}
 		//If there is no enough seats, then throws an exception
 		if(count > emptySeats.size()){
-			throw new NoEnoughSeatesException();
+			throw new NoEnoughSeatsException();
 		}
 		while(count != 0){
 			set.add(emptySeats.pop());

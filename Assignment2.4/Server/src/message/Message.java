@@ -18,6 +18,7 @@ public class Message implements Serializable, Comparable<Message> {
 	public final Clock clk;					//The timestamp of the sent process. If message is sent from client, this field should be null.
 	public final Serializable content;		//The content of this message.
 	
+	
 	/**
 	 * Create a new message.
 	 * @param type The type of message.
