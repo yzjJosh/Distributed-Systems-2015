@@ -3,6 +3,7 @@ package server;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 
 /**
  * A server process in a distributed system.
@@ -17,7 +18,8 @@ public class Server {
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
-	private static ReaderWriterLock read_write_lock = new ReaderWriterLock(20);	//The read-write lock
+	private static Semaphore read_write_lock = new Semaphore(MAX_READER_IN_A_SERVER);	//The read-write lock
+	private static final int MAX_READER_IN_A_SERVER = 20;
 	
 	/**
 	 * Initialize the server process with an info file.
@@ -74,8 +76,8 @@ public class Server {
 	private static void requestCritialSection(boolean read) throws IOException {
 		//Acquire lock firstly
 		try {
-			if(read) read_write_lock.ReaderAcquire();
-			else read_write_lock.WriterAcquire();
+			if(read) read_write_lock.acquire();
+			else read_write_lock.acquire(20);
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
 		}
