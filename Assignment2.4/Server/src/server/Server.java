@@ -168,27 +168,30 @@ public class Server {
 	
 	/**
 	 * Release the critial section, so that other server processes can enter the critial section.
-	 * @param read true if read, false if write
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void releaseCritialSection(boolean read) throws IOException{
-		/*if(message.type == MessageType.CS_REQUEST_READ) {
-			readRequests.poll();
+	private static void releaseCritialSection() throws IOException{
+		boolean write = false;
+		synchronized(requests){
+			//Remove its request from the queue firstly
+			if(write = (requests.poll().type == MessageType.CS_REQUEST_WRITE))
+				writeRequests.poll();
+		}
+		//Then tell every server that I want to release the critical section
+		synchronized(clusterInfo){
 			for(ServerState serverstat : clusterInfo.values()){
 				if(!serverstat.live || serverstat.pid == pid) continue;
 				try {
 					Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
-					sendMessage(socket, MessageType.CS_RELEASE, null);
+					sendMessage(socket, new Message(MessageType.CS_RELEASE, null, updateClock()));
 					socket.close();
 				} catch (UnknownHostException e) {
 				} catch (IOException e) {
 				}
 			}
-		}else {
-			writeRequests.poll();
-		}*/
-		if(read) read_write_lock.release();
-		else read_write_lock.release(MAX_READER_IN_A_SERVER);
+		}
+		if(write) read_write_lock.release(MAX_READER_IN_A_SERVER);
+		else read_write_lock.release();
 	}
 	
 	/**
@@ -276,17 +279,22 @@ public class Server {
 		updateClock(msg.clk); //Update the clock firstly.
 		switch(msg.type) {      //Add the message into the corresponding queue.
 		case CS_REQUEST_READ: 
+			//When receive the read request, add the request to the queue, then send back an acknowledgement.
 			synchronized(requests){
 				requests.add(msg);
 			}
+			sendMessage(socket, new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
 			break;
 		case CS_REQUEST_WRITE:
+			//When receive the write request, add the request to the queue and write queue, then send back an acknowledgement.
 			synchronized(requests){
 				requests.add(msg);
 				writeRequests.add(msg);
 			}
+			sendMessage(socket, new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
 			break;
 		case CS_RELEASE:
+			//When receive release request, remove the request from the queue
 			synchronized(requests){
 				if(requests.poll().type == MessageType.CS_REQUEST_WRITE)
 					writeRequests.poll();
