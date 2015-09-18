@@ -12,7 +12,7 @@ public class Server {
 	
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
-	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
+	private static final HashMap<Integer, Process> clusterInfo = new HashMap<Integer, Process>(); //Pid to every srever's process in the cluster.
 	private static final PriorityQueue<Message> requests = new PriorityQueue<Message>();		  //The queue of waiting requests
 	private static final PriorityQueue<Message> writeRequests = new PriorityQueue<Message>();	  		//The queue of waiting write requests
 	
@@ -28,7 +28,7 @@ public class Server {
 	 * @throws IOException If there is an error when reading the file.
 	 */
 	private static void init(String path) throws IOException {
-		try {
+		/*try {
 
 			BufferedReader br = new BufferedReader(new FileReader(path));
 			StringBuffer sb = new StringBuffer();
@@ -50,12 +50,12 @@ public class Server {
 					socket.close();
 					// Timeout Exception doesn't happen, so this server is
 					// alive.
-					ServerState state = new ServerState(pid, ip, port, true);
+					Process state = new Process(pid, socket, true);
 					clusterInfo.put(pid, state);
 				} catch (UnknownHostException e) {
 				} catch (SocketTimeoutException e) {
 					// Timeout Exception happens, so this server is not alive
-					ServerState state = new ServerState(pid, ip, port, false);
+					Process state = new Process(pid, null, false);
 					clusterInfo.put(pid, state);
 				} catch (ClassNotFoundException e) {
 					e.printStackTrace();
@@ -66,7 +66,7 @@ public class Server {
 			}
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
-		}
+		}*/
 	}
 	
 	/**
@@ -85,7 +85,7 @@ public class Server {
 		
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
-		final Clock timestampOfRequest = updateClock();
+		final Message msg = new Message(type, null, updateClock());	//The request message
 		class Lock{			
 			/**
 			 * The lock is used for synchronization purpose.
@@ -98,36 +98,32 @@ public class Server {
 		final Lock ackLock = new Lock();
 		final Thread mainThread = Thread.currentThread();
 		//Send the read requests to all other servers
-		synchronized(clusterInfo){ //No two threads can take clusterInfo's lock at the same time.
-			for(ServerState serverstat : clusterInfo.values()){
-				if(!serverstat.live || serverstat.pid == pid) continue;
-				final ServerState stat = serverstat;
-				synchronized(ackLock){
-					ackLock.num ++;	//Send a request, lock.num++.
-				}
-				new Thread(){
-					@Override
-					public void run(){
-						try {
-							Socket socket = new Socket(stat.ipAddress, stat.port);
-							updateClock();
-							sendMessage(socket, new Message(type, null, timestampOfRequest));	//Send request to a server
-							while(waitForMessage(socket, 5000).type != ackType);	//Wait for its ack reply for 5s.
-							socket.close();
-						} catch (UnknownHostException e) {
-						} catch (IOException e) {
-							synchronized(clusterInfo){
-								stat.live = false;	//If no response, set it dead.
-							}
-						}
-						//After receive the ACK or set the server dead, lock.num--.
-						synchronized(ackLock){
-							ackLock.num--;
-							mainThread.interrupt();
-						}
-					}
-				}.start();
+		for(Process process : clusterInfo.values()){
+			if(!process.live || process.pid == pid) continue;
+			final Process p = process;
+			synchronized(ackLock){
+				ackLock.num ++;	//Send a request, lock.num++.
 			}
+			new Thread(){
+				@Override
+				public void run(){
+					try {
+						updateClock();
+						p.sendMessage(msg);	//Send request to a server
+						Message reply = null;
+						while((reply = p.receiveMessage()).type != ackType);	//Wait for its ack reply for 5s.
+						updateClock(reply.clk);
+					}catch (IOException e){
+						p.live = false;	//If no response, set it dead.
+						System.out.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", is dead");
+					}
+					//After receive the ACK or set the server dead, lock.num--.
+					synchronized(ackLock){
+						ackLock.num--;
+						mainThread.interrupt();
+					}
+				}
+			}.start();
 		}
 		
 		while(ackLock.num > 0)
@@ -139,27 +135,23 @@ public class Server {
 		
 		if(read){
 			synchronized(requests){
-				requests.add(new Message(MessageType.CS_REQUEST_READ, null, timestampOfRequest));	//Add itself to the request queue
+				requests.add(msg);	//Add itself to the request queue
 				//If there is at least one write request whose timestamp is smaller, it has to wait
-				while(!writeRequests.isEmpty() && writeRequests.peek().clk.compareTo(timestampOfRequest) < 0)
+				while(!writeRequests.isEmpty() && writeRequests.peek().compareTo(msg) < 0)
 					try {
 						requests.wait();
-					} catch (InterruptedException e) {
-						e.printStackTrace();
-					}
+					} catch (InterruptedException e) {}
 			}
 			//After it's notified and satisfies the requirements, it can enter the cs.	
 			return;
 		}else{
 			synchronized(requests){
-				requests.add(new Message(MessageType.CS_REQUEST_WRITE, null, timestampOfRequest));	//Add itself to the request queue
-				writeRequests.add(new Message(MessageType.CS_REQUEST_WRITE, null, timestampOfRequest)); //Add itself to the write request queue
-				while(requests.peek().clk.pid != pid)
+				requests.add(msg);	//Add itself to the request queue
+				writeRequests.add(msg); //Add itself to the write request queue
+				while(requests.peek() != msg)
 					try {
 						requests.wait();
-					} catch (InterruptedException e) {
-						e.printStackTrace();
-					}
+					} catch (InterruptedException e) {}
 			}
 			return;         //After it's notified and satisfies the requirements, it can enter the cs.
 		}
@@ -178,18 +170,7 @@ public class Server {
 				writeRequests.poll();
 		}
 		//Then tell every server that I want to release the critical section
-		synchronized(clusterInfo){
-			for(ServerState serverstat : clusterInfo.values()){
-				if(!serverstat.live || serverstat.pid == pid) continue;
-				try {
-					Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
-					sendMessage(socket, new Message(MessageType.CS_RELEASE, null, updateClock()));
-					socket.close();
-				} catch (UnknownHostException e) {
-				} catch (IOException e) {
-				}
-			}
-		}
+		broadCastMessage(new Message(MessageType.CS_RELEASE, null, null), true);
 		if(write) read_write_lock.release(MAX_READER_IN_A_SERVER);
 		else read_write_lock.release();
 	}
@@ -224,58 +205,18 @@ public class Server {
 		}
 		return ret;
 	}
-
-	/**
-	 * Send a message through a socket
-	 * @param msg The message to send
-	 * @throws IOException If some io errors occur
-	 */
-	private static void sendMessage(Socket socket, Message msg) throws IOException{
-		new ObjectOutputStream(socket.getOutputStream()).writeObject(msg);
-	}
 	
-	/**
-	 * Wait for a message from a socket for certain number of time. This method is useful to check if a server is dead.
-	 * @param socket The socket to wait message on.
-	 * @param waitTime The time of waiting. If no message received after that time, an IOException will be thrown.
-	 * @return Received message.
-	 * @throws IOException If there is an io error, or does not hear back on time.
-	 */
-	private static Message waitForMessage(Socket socket, final int waitTime) throws IOException{
-		final ObjectInputStream istream = new ObjectInputStream(socket.getInputStream()); //Get inputstream from socket.
-		Thread monitor = new Thread(){ // Create a new thread, wait some time and shut down the stream.
-			@Override
-			public void run() {
-				try {
-					Thread.sleep(waitTime);
-					istream.close();
-				} catch (InterruptedException e) {}
-				catch(IOException e){}	
-			}
-		};
-		monitor.start(); // Start the new thread.
-		Message msg = null;
-		try {
-			msg = (Message) istream.readObject();
-		} catch (ClassNotFoundException e) {
-			e.printStackTrace();
-			System.exit(-1);
-		}
-		updateClock(msg.clk); //Update the clock.
-		monitor.interrupt(); // Stop the monitor from waiting.
-		return msg;
-	}
 	
 	
 	/**
-	 * This method is called whenever a message is received. The message could be a client request or messages from 
+	 * This method is called whenever a message is received through the server port. The message could be a client request or messages from 
 	 * other servers. These messages will be processed and responded here. (This method may be called by different threads
 	 * simontaneously, so be careful with concurrency when implementing it)
 	 * @param msg The message received.
-	 * @param socket The socket where this message is sent.
+	 * @param link The outputstream where you can send a reply.
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	public static void onReceivingMessage(Message msg, Socket socket) throws IOException{
+	public static void onReceivingMessage(Message msg, ObjectOutputStream link) throws IOException{
 		updateClock(msg.clk); //Update the clock firstly.
 		switch(msg.type) {      //Add the message into the corresponding queue.
 		case CS_REQUEST_READ: 
@@ -283,7 +224,7 @@ public class Server {
 			synchronized(requests){
 				requests.add(msg);
 			}
-			sendMessage(socket, new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
+			link.writeObject(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
 			break;
 		case CS_REQUEST_WRITE:
 			//When receive the write request, add the request to the queue and write queue, then send back an acknowledgement.
@@ -291,7 +232,7 @@ public class Server {
 				requests.add(msg);
 				writeRequests.add(msg);
 			}
-			sendMessage(socket, new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
+			link.writeObject(new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
 			break;
 		case CS_RELEASE:
 			//When receive release request, remove the request from the queue
@@ -310,14 +251,20 @@ public class Server {
 	
 	/**
 	 * Send the timestamped message to all other servers.
+	 * @param msg The message to broadcast
+	 * @param usingCurTimestamp If using current timestamp. If true, use real-time timestamp. If false, use the timestamp
+	 * of msg.
 	 */
-	public static void broadCastClock(){
-		for(ServerState serverstat : clusterInfo.values()){
-			if(!serverstat.live || serverstat.pid == pid) continue;
+	public static void broadCastMessage(Message msg, boolean usingCurTimestamp){
+		for(Process process : clusterInfo.values()){
+			if(!process.live || process.pid == pid) continue;
 			try {
-				Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
-				sendMessage(socket, new Message(MessageType.CLOCK_MESSAGE, null, updateClock()));
-				socket.close();
+				if(usingCurTimestamp)
+					process.sendMessage(new Message(msg.type, msg.content, updateClock()));
+				else{
+					updateClock();
+					process.sendMessage(msg);
+				}
 			} catch (UnknownHostException e) {
 			} catch (IOException e) {
 			}
@@ -329,7 +276,7 @@ public class Server {
 	 * @param args args[0] is the file where the server addresses and port# are defined.
 	 */
 	public static void main(String[] args){
-		try {
+		/*try {
 			Server.init(args[0]);
 			new ClockUpdateThread(5000).start();
 			ServerSocket serversocket = new ServerSocket(clusterInfo.get(pid).port);
@@ -339,6 +286,70 @@ public class Server {
 		} catch (IOException e) {
 			e.printStackTrace();
 			
+		}*/
+		
+		//Following code is for unit test
+		pid = Integer.parseInt(args[0]);
+		clock = new Clock(0, pid);
+		clusterInfo.put(0, new Process(0, "192.168.1.120", 12345, true));
+		clusterInfo.put(1, new Process(1, "192.168.1.120", 12346, true));
+		clusterInfo.put(2, new Process(2, "192.168.1.120", 12347, true));
+		clusterInfo.put(3, new Process(3, "192.168.1.120", 12348, true));
+		try {
+			final ServerSocket seversocket = new ServerSocket(clusterInfo.get(pid).port);
+			Socket socket = seversocket.accept();
+			System.out.println("let's start!");
+			new Thread(){
+				@Override
+				public void run(){
+					while(true)
+						try {
+							new ServerThread(seversocket.accept()).start();
+						} catch (IOException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+				}
+			}.start();
+			socket.close();
+		} catch (IOException e1) {
+			e1.printStackTrace();
+		}
+		try {
+			Thread.sleep(3000);
+		} catch (InterruptedException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		for(Process p : clusterInfo.values())
+			try{
+				p.connect();
+			}catch(Exception e){}
+		
+		try {
+			Thread.sleep(3000);
+		} catch (InterruptedException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		for(int i=0; i<1000; i++){
+			try {			
+					requestCritialSection(false);
+					File testFile = new File("E:\\USA\\courses\\Distributed System\\test\\test.txt");
+					BufferedReader br = new BufferedReader(new FileReader(testFile));
+					int read = Integer.parseInt(br.readLine());
+					br.close();
+				//	releaseCritialSection();
+				//	requestCritialSection(false);
+					BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
+					writer.write(""+(read+1));
+					writer.close();
+					releaseCritialSection();	
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			
+
 		}
 		
 	}

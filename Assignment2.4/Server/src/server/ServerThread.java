@@ -24,10 +24,9 @@ public class ServerThread extends Thread {
 		
 		try {
 			ObjectInputStream istream = new ObjectInputStream(socket.getInputStream());
-			while(true){
-				Message msg = (Message) istream.readObject();
-				Server.onReceivingMessage(msg, socket);
-			}
+			ObjectOutputStream ostream = new ObjectOutputStream(socket.getOutputStream());
+			while(true)
+				Server.onReceivingMessage((Message)istream.readObject(), ostream);
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {

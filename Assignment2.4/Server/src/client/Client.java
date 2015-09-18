@@ -17,13 +17,13 @@ import javax.swing.JTextField;
 
 import server.ClockUpdateThread;
 import server.Server;
-import server.ServerState;
+import server.Process;
 import server.ServerThread;
 public class Client extends JFrame {
 	Socket client = null;
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
-	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
+	private static final HashMap<Integer, Process> clusterInfo = new HashMap<Integer, Process>(); //Pid to every srever's state in the cluster.
 	private JTextField messageField;
 	private RandomAccessFile serversInfo = null;
 	
