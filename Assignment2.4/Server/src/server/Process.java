@@ -4,6 +4,8 @@ import java.io.*;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 
+import message.Message;
+
 
 /**
  * Process is a process of distributed system.

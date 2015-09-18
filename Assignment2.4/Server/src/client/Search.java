@@ -17,17 +17,21 @@ import java.io.Writer;
 import javax.swing.JTextField;
 import javax.swing.JLabel;
 
+import server.Process;
+import message.Message;
+import message.MessageType;
+
 public class Search extends JDialog {
 
 	private final JPanel contentPanel = new JPanel();
 	private JTextField nameField;
-    private ObjectOutputStream writeSearch;
+  
 
 	/**
 	 * Create the dialog.
 	 */
-	public Search(ObjectOutputStream writer) {
-		writeSearch = writer;
+	public Search(final Process server) {
+	
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
 		contentPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
@@ -52,10 +56,10 @@ public class Search extends JDialog {
 				JButton okButton = new JButton("OK");
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
-						String name = nameField.getText();
-				        try {
-							writeSearch.writeObject(name);
-							writeSearch.flush();
+						String data = nameField.getText();
+						Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
+						try {
+							server.sendMessage(msg);
 						} catch (IOException e1) {
 							e1.printStackTrace();
 						}
@@ -72,5 +76,8 @@ public class Search extends JDialog {
 			}
 		}
 	}
+
+
+	
 
 }

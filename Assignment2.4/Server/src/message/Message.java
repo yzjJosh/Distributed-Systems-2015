@@ -1,6 +1,8 @@
-package server;
+package message;
 
 import java.io.Serializable;
+
+import server.Clock;
 
 
 

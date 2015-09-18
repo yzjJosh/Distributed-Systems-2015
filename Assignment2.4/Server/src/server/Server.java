@@ -5,6 +5,8 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 
+import message.*;
+
 /**
  * A server process in a distributed system.
  */
@@ -242,7 +244,7 @@ public class Server {
 				requests.notifyAll();
 			}
 			break;
-		default:
+		    default:
 			break;
 		}
 		

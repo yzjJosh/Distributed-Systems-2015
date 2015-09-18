@@ -1,5 +1,6 @@
 package server;
 
+import message.*;
 /**
  * ClockUpdateThread is a thread witch peiodically sends a timestamped message to all other processes.
  *
