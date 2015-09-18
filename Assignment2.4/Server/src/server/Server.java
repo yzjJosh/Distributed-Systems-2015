@@ -12,13 +12,12 @@ public class Server {
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
 	private static final HashMap<Integer, ServerState> clusterInfo = new HashMap<Integer, ServerState>(); //Pid to every srever's state in the cluster.
-	private static final PriorityQueue<Message> readRequests = new PriorityQueue<Message>();		  //The queue of waiting read requests
+	private static final PriorityQueue<Message> requests = new PriorityQueue<Message>();		  //The queue of waiting requests
 	private static final PriorityQueue<Message> writeRequests = new PriorityQueue<Message>();	  		//The queue of waiting write requests
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
-	private static Semaphore read_write_lock = new Semaphore(20);	//The read-write lock
-	private static RandomAccessFile serversInfo;
+	private static ReaderWriterLock read_write_lock = new ReaderWriterLock(20);	//The read-write lock
 	
 	/**
 	 * Initialize the server process with an info file.
@@ -41,7 +40,7 @@ public class Server {
 				try {
 					Socket socket = new Socket(ip, port);
 					socket.setSoTimeout(5 * 1000); // set the timeout to 5s
-					sendMessage(socket, MessageType.SERVER_SYNC, null);
+					sendMessage(socket, new Message(MessageType.SERVER_SYNC, null, updateClock()));
 					ObjectInputStream reader = new ObjectInputStream(
 							socket.getInputStream());
 					reader.readObject();
@@ -74,8 +73,13 @@ public class Server {
 	 */
 	private static void requestCritialSection(boolean read) throws IOException {
 		//Acquire lock firstly
-		if(read) read_write_lock.acquire();
-		else for(int i=0; i<20; i++) read_write_lock.acquire();
+		try {
+			if(read) read_write_lock.ReaderAcquire();
+			else read_write_lock.WriterAcquire();
+		} catch (InterruptedException e1) {
+			e1.printStackTrace();
+		}
+		
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
 		final Clock timestampOfRequest = updateClock();
@@ -130,48 +134,33 @@ public class Server {
 		//---------------------------------------------------------------------------------------------------------------
 		//If enter this line, then congratulations! You have received acks from all lived servers
 		
-		if (read) {
-			//writeRequest queue is not empty and there is at least one write request whose timestamp is smaller, so it has to wait
-			while(!writeRequests.isEmpty() && writeRequests.peek().clk.compareTo(timestampOfRequest) < 0){       
-				try {
-					Thread.currentThread();
-					Thread.sleep(5 * 1000);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
+		if(read){
+			synchronized(requests){
+				requests.add(new Message(MessageType.CS_REQUEST_READ, null, timestampOfRequest));	//Add itself to the request queue
+				//If there is at least one write request whose timestamp is smaller, it has to wait
+				while(!writeRequests.isEmpty() && writeRequests.peek().clk.compareTo(timestampOfRequest) < 0)
+					try {
+						requests.wait();
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
 			}
-			return;              //After it's notified and satisfies the requirements, it can enter the cs.
-		}else if (message.type == MessageType.CS_REQUEST_WRITE && pid == writeRequests.peek().clk.pid) {  //it's a write thread and is the first thread in the queue
-			//Send the write requests to all other servers
-			for(ServerState serverstat : clusterInfo.values()){
-				if(!serverstat.live || serverstat.pid == pid) continue;
-				try {
-					Socket socket = new Socket(serverstat.ipAddress, serverstat.port);
-					sendMessage(socket, MessageType.CS_REQUEST_WRITE, null);
-					socket.close();
-				} catch (UnknownHostException e) {
-				} catch (IOException e) {
-				}
-			}
-			
-			if(readRequests.isEmpty()){                 //The read queue is empty so it can directly enter the cs.
-				return;
-			}
-			while(message.clk.timestamp >= readRequests.peek().clk.timestamp){   //If its timestamp is larger than or equal to the first read thread, it's hung up
-				try {
-					Thread.currentThread();
-					Thread.sleep(5 * 1000);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
+			//After it's notified and satisfies the requirements, it can enter the cs.	
+			return;
+		}else{
+			synchronized(requests){
+				requests.add(new Message(MessageType.CS_REQUEST_WRITE, null, timestampOfRequest));	//Add itself to the request queue
+				writeRequests.add(new Message(MessageType.CS_REQUEST_WRITE, null, timestampOfRequest)); //Add itself to the write request queue
+				while(requests.peek().clk.pid != pid)
+					try {
+						requests.wait();
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
 			}
 			return;         //After it's notified and satisfies the requirements, it can enter the cs.
 		}
-		
-		if(read) read_write_lock.release();
-		else 
-			for(int i=0; i<20; i++)
-				read_write_lock.release();
+
 	}
 	
 	/**
@@ -179,7 +168,7 @@ public class Server {
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
 	private static void releaseCritialSection(Message message) throws IOException{
-		if(message.type == MessageType.CS_REQUEST_READ) {
+		/*if(message.type == MessageType.CS_REQUEST_READ) {
 			readRequests.poll();
 			for(ServerState serverstat : clusterInfo.values()){
 				if(!serverstat.live || serverstat.pid == pid) continue;
@@ -193,7 +182,7 @@ public class Server {
 			}
 		}else {
 			writeRequests.poll();
-		}
+		}*/
 		
 	}
 	
@@ -281,10 +270,26 @@ public class Server {
 	public static void onReceivingMessage(Message msg, Socket socket) throws IOException{
 		updateClock(msg.clk); //Update the clock firstly.
 		switch(msg.type) {      //Add the message into the corresponding queue.
-		case ACKNOWLEDGE_READ: 
-			readRequests.add(msg);
-		case ACKNOWLEDGE_WRITE:
-			writeRequests.add(msg);
+		case CS_REQUEST_READ: 
+			synchronized(requests){
+				requests.add(msg);
+			}
+			break;
+		case CS_REQUEST_WRITE:
+			synchronized(requests){
+				requests.add(msg);
+				writeRequests.add(msg);
+			}
+			break;
+		case CS_RELEASE:
+			synchronized(requests){
+				if(requests.poll().type == MessageType.CS_REQUEST_WRITE)
+					writeRequests.poll();
+				requests.notifyAll();
+			}
+			break;
+		default:
+			break;
 		}
 		
 		
