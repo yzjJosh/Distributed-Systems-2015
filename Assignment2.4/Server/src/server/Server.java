@@ -18,8 +18,9 @@ public class Server {
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
+	private static final int MAX_READER_IN_A_SERVER = 20;	//Maximum number of concurent readers in each server.
 	private static Semaphore read_write_lock = new Semaphore(MAX_READER_IN_A_SERVER);	//The read-write lock
-	private static final int MAX_READER_IN_A_SERVER = 20;
+	
 	
 	/**
 	 * Initialize the server process with an info file.
@@ -77,7 +78,7 @@ public class Server {
 		//Acquire lock firstly
 		try {
 			if(read) read_write_lock.acquire();
-			else read_write_lock.acquire(20);
+			else read_write_lock.acquire(MAX_READER_IN_A_SERVER);
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
 		}
@@ -167,9 +168,10 @@ public class Server {
 	
 	/**
 	 * Release the critial section, so that other server processes can enter the critial section.
+	 * @param read true if read, false if write
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void releaseCritialSection(Message message) throws IOException{
+	private static void releaseCritialSection(boolean read) throws IOException{
 		/*if(message.type == MessageType.CS_REQUEST_READ) {
 			readRequests.poll();
 			for(ServerState serverstat : clusterInfo.values()){
@@ -185,7 +187,8 @@ public class Server {
 		}else {
 			writeRequests.poll();
 		}*/
-		
+		if(read) read_write_lock.release();
+		else read_write_lock.release(MAX_READER_IN_A_SERVER);
 	}
 	
 	/**
