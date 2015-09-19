@@ -5,6 +5,8 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 
+import message.Message;
+
 
 /**
  * Process is a process of distributed system.
@@ -18,8 +20,6 @@ public class Process {
 	private ObjectInputStream receive;		//The stream to receive data from server
 	public boolean live;					//If the server process live or dead.
 	private ServerThread thread;			//The thread which listens to incoming messages from this process
-	private Object lock = new Object();		//The lock to make sure cocurrent performance
-	
 	
 	/**
 	 * Create a new process object

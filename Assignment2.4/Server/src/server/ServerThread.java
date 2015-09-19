@@ -3,6 +3,8 @@ package server;
 import java.io.*;
 import java.net.*;
 
+import message.Message;
+
 /**
  * Server thread is the thread where server runs. It waits for requests from clients and handle it.
  *

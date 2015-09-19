@@ -5,6 +5,11 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 
+import exceptions.NoEnoughSeatsException;
+import exceptions.NoReservationInfoException;
+import exceptions.RepeateReservationException;
+import message.*;
+
 /**
  * A server process in a distributed system.
  */
@@ -21,7 +26,8 @@ public class Server {
 	private static Object clock_lock = new Object();	//clock access mutex lock
 	private static final int MAX_READER_IN_A_SERVER = 20;	//Maximum number of concurent readers in each server.
 	private static Semaphore read_write_lock = new Semaphore(MAX_READER_IN_A_SERVER);	//The read-write lock
-	
+	private static TheaterService service = new TheaterService(pid);
+	private static File file = null;
 	
 	/**
 	 * Initialize the server process with an info file.
@@ -29,45 +35,45 @@ public class Server {
 	 * @throws IOException If there is an error when reading the file.
 	 */
 	private static void init(String path) throws IOException {
-		/*try {
-
-			BufferedReader br = new BufferedReader(new FileReader(path));
-			StringBuffer sb = new StringBuffer();
-			String server = br.readLine();
-			while (server != null) {
-				// Extract the ip and port information from the line.
-				String[] splits = server.split(" ");
-				String ip = splits[0];
-				int port = Integer.parseInt(splits[1]);
-				// Try to find out if the server is alive by sending an ack and
-				// check if the sender server can receive a response in time.
-				try {
-					Socket socket = new Socket(ip, port);
-					socket.setSoTimeout(5 * 1000); // set the timeout to 5s
-					sendMessage(socket, new Message(MessageType.SERVER_SYNC, null, updateClock()));
-					ObjectInputStream reader = new ObjectInputStream(
-							socket.getInputStream());
-					reader.readObject();
-					socket.close();
-					// Timeout Exception doesn't happen, so this server is
-					// alive.
-					Process state = new Process(pid, socket, true);
-					clusterInfo.put(pid, state);
-				} catch (UnknownHostException e) {
-				} catch (SocketTimeoutException e) {
-					// Timeout Exception happens, so this server is not alive
-					Process state = new Process(pid, null, false);
-					clusterInfo.put(pid, state);
-				} catch (ClassNotFoundException e) {
-					e.printStackTrace();
-				}
-				// Read the next server information.
-				br.readLine();
-
-			}
+		file = new File(path);
+		BufferedReader reader = null;
+		Process process = null;
+		int i = 0;
+	
+		try {
+			reader = new BufferedReader(new FileReader(file));
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
-		}*/
+		}
+		String serverInfo;
+		String[] splits = null;
+		String ip = null;
+		int port = 0;
+		try {
+			while ((serverInfo = reader.readLine()) != null) {
+				//Split the serverInfo to get the host and port.
+				splits = serverInfo.split(" ");
+				ip = splits[0];
+				port = Integer.parseInt(splits[1]);
+				// Try to find out if the server is alive by sending an ack and
+				// check if the sender server can receive a response in time.
+				process = new Process(i, ip, port, true);
+				try {
+					process.connect();						
+					clusterInfo.put(i, process);
+				}catch (SocketTimeoutException e) {
+					process = new Process(i, ip, port, false);
+					clusterInfo.put(i, process);			
+				}
+				i++;
+			}
+		} catch (NumberFormatException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		
 		//After successfully initialize clusterInfo...
 		ServerSocket serversocket = null;
@@ -87,13 +93,14 @@ public class Server {
 				serversocket.close();
 		}
 	}
+
 	
 	/**
 	 * Request critial section access. If critial section is unavailable, block the thread until it becomes available.
 	 * @param read true if read, false if write
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void requestCritialSection(boolean read) throws IOException {
+	private static void requestCriticalSection(boolean read) throws IOException {
 		//Acquire lock firstly
 		try {
 			if(read) read_write_lock.acquire();
@@ -101,7 +108,7 @@ public class Server {
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
 		}
-		
+	
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
 		final Message msg = new Message(type, null, updateClock());	//The request message
@@ -192,7 +199,7 @@ public class Server {
 	 * Release the critial section, so that other server processes can enter the critial section.
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	private static void releaseCritialSection() throws IOException{
+	private static void releaseCriticalSection() throws IOException{
 		boolean write = false;
 		synchronized(requests){
 			//Remove its request from the queue firstly
@@ -254,6 +261,7 @@ public class Server {
 	public static void onReceivingMessage(Message msg, ObjectOutputStream link) throws IOException{
 		updateClock(msg.clk); //Update the clock firstly.
 		switch(msg.type) {      //Add the message into the corresponding queue.
+		
 			case CS_REQUEST_READ: 
 				//When receive the read request, add the request to the queue, then send back an acknowledgement.
 				synchronized(requests){
@@ -289,8 +297,52 @@ public class Server {
 					requests.notifyAll();
 				}
 				break;
+			case RESERVE_SEAT:    //When receiving a reserve request, to execute the following service.
+				//enter cs
+				requestCriticalSection(false);
+				String[] contents = ((String) msg.content).split(" ");
+				try {
+					//Reservation is successful
+					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
+					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT,  (Serializable) seats, null));
+				} catch (NumberFormatException e) {
+					
+				} catch (NoEnoughSeatsException e) {
+					//There is not enough seats
+					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+				} catch (RepeateReservationException e) {
+					//The reservation is repeated
+					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+				}
+				//release cs
+				releaseCriticalSection();
+				break;
+			case SEARCH_SEAT:
+				//Enter cs as a reader
+				requestCriticalSection(true);
+				try {
+					Set <Integer> seats = service.search((String)msg.content);
+					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
+				} catch (NoReservationInfoException e) {
+					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+				}
+				//Leave cs
+				releaseCriticalSection();
+				break;
+			case DELETE_SEAT:
+				//Enter cs as  a writer
+				requestCriticalSection(false);
+				try {
+					//num = the number of the released seats
+					int num = service.delete((String)msg.content);
+					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
+				} catch (NoReservationInfoException e) {
+					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+				}
+				//Leave cs
+				releaseCriticalSection();
+				break;					
 			default:
-				System.out.println(msg);
 				break;
 		}
 		
@@ -358,10 +410,11 @@ public class Server {
 				if(p.pid < pid)
 				p.connect();
 			}catch(Exception e){}
+
 		for(int i=0; i<50; i++){
 			try {		
 					assert(requests.isEmpty() || requests.first().clk.pid!=pid);
-					requestCritialSection(false);
+					requestCriticalSection(false);
 					assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
 					/*System.out.println("The first one in request queue is:");
 					synchronized(requests){
@@ -378,9 +431,10 @@ public class Server {
 					BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
 					writer.write(""+(read+1));
 					writer.close();
+
 				//	System.out.println("Process "+pid+" leave CS"+" at "+System.currentTimeMillis()%10000);
 					assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid+". clock="+clock;
-					releaseCritialSection();	
+					releaseCriticalSection();	
 					assert(requests.isEmpty() || requests.first().clk.pid!=pid);
 			} catch (Exception e) {
 				e.printStackTrace();

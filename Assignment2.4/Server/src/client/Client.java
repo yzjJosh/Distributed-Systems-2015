@@ -2,6 +2,7 @@ package client;
 import java.io.*;
 import java.net.*;
 import java.util.HashMap;
+import java.util.Random;
 
 import javax.swing.JFrame;
 import javax.swing.JButton;
@@ -15,40 +16,48 @@ import com.sun.xml.internal.ws.message.stream.OutboundStreamHeader;
 
 import javax.swing.JTextField;
 
+import message.Message;
 import server.ClockUpdateThread;
 import server.Server;
 import server.Process;
 import server.ServerThread;
 public class Client extends JFrame {
-	Socket client = null;
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
 	private static final HashMap<Integer, Process> clusterInfo = new HashMap<Integer, Process>(); //Pid to every srever's state in the cluster.
 	private JTextField messageField;
-	private RandomAccessFile serversInfo = null;
-	
-	private String host = null;
-	private int port = 0;
+	private File file = null;
+	private Process server = null;
 	/**
-	 * Read a random server information from the specified file
-	 * @param path
+	 * Read the server information from the specified file
+	 * @param path the file path
 	 */
-	public void ReadServerInfo(String path){
+	public void readServerInfo(String path) {
+		file = new File(path);
+		BufferedReader reader = null;
 		try {
-			serversInfo = new RandomAccessFile(path, "r");
-			String server;
-			try {
-				server = serversInfo.readLine();
-				String[] splits = server.split(" ");
-			    host = splits[0];
-			    port = Integer.parseInt(splits[1]);
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+			reader = new BufferedReader(new FileReader(file));
+			String serverInfo;
+			int i = 0;
+			while ((serverInfo = reader.readLine()) != null) {
+				//Split the serverInfo to get the host and port.
+				String[] splits = serverInfo.split(" ");
+				String ip = splits[0];
+				int port = Integer.parseInt(splits[1]);
+				Process process = new Process(i, ip, port, false);
+				clusterInfo.put(i, process);
+				i++;
 			}
-				
-		} catch (FileNotFoundException e) {
+
+		} catch (IOException e) {
 			e.printStackTrace();
+		} finally {
+			if (reader != null) {
+				try { //Close the reader.
+					reader.close();
+				} catch (IOException e1) {
+				}
+			}
 		}
 	}
 	/**
@@ -60,7 +69,7 @@ public class Client extends JFrame {
 		JButton btnReservation = new JButton("Reservation");
 		btnReservation.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				Reserve re = new Reserve(writer);
+				Reserve re = new Reserve(server);
 			}
 		});
 		btnReservation.setBounds(66, 59, 117, 57);
@@ -69,7 +78,7 @@ public class Client extends JFrame {
 		JButton btnSearch = new JButton("Search");
 		btnSearch.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
-				Search se = new Search(writer);
+				Search se = new Search(server);
 			}
 		});
 		btnSearch.setBounds(66, 128, 117, 65);
@@ -78,7 +87,7 @@ public class Client extends JFrame {
 		JButton btnDelete = new JButton("Delete");
 		btnDelete.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				Delete de = new Delete(writer);
+				Delete de = new Delete(server);
 			}
 		});
 		btnDelete.setBounds(66, 205, 117, 57);
@@ -97,34 +106,51 @@ public class Client extends JFrame {
 		lblFromServerSystem.setBounds(243, 78, 147, 16);
 		getContentPane().add(lblFromServerSystem);
 		//Initialize the socket
-		client = new Socket(host, port);
-		writer = new ObjectOutputStream(client.getOutputStream());
-		//Ready to read the server message
-		reader = new ObjectInputStream(client.getInputStream());
-		
-		
+		//Choose a random live server to connect.
+		while(true) {			
+			int chosenServer = new Random().nextInt(clusterInfo.size());
+			server = clusterInfo.get(chosenServer);
+			if(server.live) break;
+		}	
+	}
+	/**
+	 * Randomly choose a server to connect
+	 */
+	public void connectToServer() {
+		try {
+		int chosenServer = new Random().nextInt(clusterInfo.size());
+		server = clusterInfo.get(chosenServer);
+		server.connect();
+		server.live = true;
+		} catch(IOException e) {
+			//The connection failed, make the live tag false and reconnect
+			server.live = false;
+			connectToServer();
+		}
 	}
 	/**
 	 * Refresh the message field to show the new message from the server
 	 * @throws IOException when failed to read the message
 	 * @throws ClassNotFoundException 
 	 */
-	public void refreshMessage() throws IOException, ClassNotFoundException {
-		client.setSoTimeout(5 * 1000); // set the timeout to 5s
-	    String data = "";
-	    try {
-	    	data = (String) reader.readObject();
-	    	messageField.setText(data);
-	    } catch (SocketTimeoutException e) {
-	    	messageField.setText("time is out! Connection to the server is off! \n");
-	    	//Reconnect to a new server
-	    	ReadServerInfo("ServersInfo.txt");
-	    	client.connect(new InetSocketAddress(host, port));
-	    }
+	public void refreshMessage() {
+		Message reply = null;
+		try {
+			reply =  server.receiveMessage();
+		} catch (IOException e) {
+			connectToServer();
+		}	
+		//Message from the server is not null, show the message.
+		if(reply != null) {
+			String content = (String) reply.content;
+			messageField.setText(content);			
+		}
 	}
 	public static void main(String[] args) throws Exception{
 		Client client = new Client();
-		client.ReadServerInfo("ServersInfo.txt");
+		String path = "servers.txt";
+		client.readServerInfo(path);
+		client.connectToServer();
 		while(true) {
 			client.refreshMessage();
 		}

@@ -10,6 +10,10 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.JTextField;
 import javax.swing.JLabel;
 
+import server.Process;
+import message.Message;
+import message.MessageType;
+
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
@@ -20,14 +24,14 @@ public class Delete extends JDialog {
 
 	private final JPanel contentPanel = new JPanel();
 	private JTextField nameField;
-    private ObjectOutputStream writeDelete;
+   
 
 
 	/**
 	 * Create the dialog.
+	 * @param server 
 	 */
-	public Delete(ObjectOutputStream writer) {
-		writeDelete = writer;
+	public Delete(final Process server) {
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
 		contentPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
@@ -53,10 +57,10 @@ public class Delete extends JDialog {
 				//Start to send the name to the server
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
-						String name = nameField.getText();
-				        try {
-							writeDelete.writeObject(name);
-							writeDelete.flush();
+						String data = nameField.getText() ;
+						Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
+						try {
+							server.sendMessage(msg);
 						} catch (IOException e1) {
 							e1.printStackTrace();
 						}
