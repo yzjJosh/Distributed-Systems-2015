@@ -13,8 +13,9 @@ public class Server {
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
 	private static final HashMap<Integer, Process> clusterInfo = new HashMap<Integer, Process>(); //Pid to every srever's process in the cluster.
-	private static final PriorityQueue<Message> requests = new PriorityQueue<Message>();		  //The queue of waiting requests
-	private static final PriorityQueue<Message> writeRequests = new PriorityQueue<Message>();	  		//The queue of waiting write requests
+	private static final TreeSet<Message> requests = new TreeSet<Message>();		  //The queue of waiting requests
+	private static final TreeSet<Message> writeRequests = new TreeSet<Message>();	  		//The queue of waiting write requests
+	private static final HashMap<Integer, LinkedList<Message>> requestsMap = new HashMap<Integer, LinkedList<Message>>(); //From pid to a request
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
@@ -67,6 +68,24 @@ public class Server {
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
 		}*/
+		
+		//After successfully initialize clusterInfo...
+		ServerSocket serversocket = null;
+		try {
+			new ClockUpdateThread(5000).start();	//Start the clock update thread
+			serversocket = new ServerSocket(clusterInfo.get(pid).port);	//Start the server socket, listening to new connections
+			while(true){	//Keep doing
+				Socket socket = serversocket.accept();	//Got a connection!
+				new ServerThread(socket).start();	//Create a new server thread to serve this client.
+			}
+			
+		} catch (IOException e) {
+			e.printStackTrace();
+			
+		}finally{
+			if(serversocket != null)
+				serversocket.close();
+		}
 	}
 	
 	/**
@@ -95,67 +114,78 @@ public class Server {
 			 */
 			public int num = 0;
 		}
-		final Lock ackLock = new Lock();
-		final Thread mainThread = Thread.currentThread();
-		//Send the read requests to all other servers
+		
+		final Lock test = new Lock();
+		
+		//Send the requests to all other servers
+		class mThread extends Thread{
+			Semaphore m = new Semaphore(0);
+		}
+		LinkedList<mThread> l = new LinkedList<mThread>();
 		for(Process process : clusterInfo.values()){
 			if(!process.live || process.pid == pid) continue;
 			final Process p = process;
-			synchronized(ackLock){
-				ackLock.num ++;	//Send a request, lock.num++.
-			}
-			new Thread(){
-				@Override
-				public void run(){
-					try {
-						updateClock();
-						p.sendMessage(msg);	//Send request to a server
-						Message reply = null;
-						while((reply = p.receiveMessage()).type != ackType);	//Wait for its ack reply for 5s.
-						updateClock(reply.clk);
-					}catch (IOException e){
-						p.live = false;	//If no response, set it dead.
-						System.out.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", is dead");
+			//l.add(new mThread(){
+			//	@Override
+			//	public void run(){
+					synchronized(p){
+						if(p.live){
+							try {
+								updateClock();
+								p.sendMessage(msg);	//Send request to a server
+								Message reply = p.receiveMessage(); //Wait for its ack reply for 5s.
+								updateClock(reply.clk);
+								assert(reply.type == ackType);
+								assert(reply.compareTo(msg) > 0);
+								assert(reply.clk.pid == p.pid);
+			//					synchronized(test){
+								test.num++;		
+				//				}
+							}catch (IOException e){
+								p.live = false;	//If no response, set it dead.
+								System.out.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", is dead");
+								e.printStackTrace();
+							}
+						}
 					}
-					//After receive the ACK or set the server dead, lock.num--.
-					synchronized(ackLock){
-						ackLock.num--;
-						mainThread.interrupt();
-					}
-				}
-			}.start();
+		//			m.release();
+		//		}
+		//	});
+		//	l.peekLast().start();
+			
+			
 		}
-		
-		while(ackLock.num > 0)
+		for(mThread thread : l)
 			try {
-				Thread.sleep(1000);	//If have not received enough ack, sleep.
-			} catch (InterruptedException e) {}
+				thread.m.acquire();
+			} catch (InterruptedException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
 		//---------------------------------------------------------------------------------------------------------------
 		//If enter this line, then congratulations! You have received acks from all lived servers
-		
-		if(read){
-			synchronized(requests){
-				requests.add(msg);	//Add itself to the request queue
+		//assert(test.num == 9): "num is "+test.num;
+		synchronized(requests){
+			requests.add(msg);	//Add itself to the request queue
+			LinkedList<Message> list = requestsMap.get(pid);
+			if(list == null) requestsMap.put(pid, list = new LinkedList<Message>());
+			list.add(msg); //Add the message to the pid to message map.
+			if(read){
 				//If there is at least one write request whose timestamp is smaller, it has to wait
-				while(!writeRequests.isEmpty() && writeRequests.peek().compareTo(msg) < 0)
+				while(!writeRequests.isEmpty() && writeRequests.first().compareTo(msg) < 0)
 					try {
 						requests.wait();
 					} catch (InterruptedException e) {}
-			}
-			//After it's notified and satisfies the requirements, it can enter the cs.	
-			return;
-		}else{
-			synchronized(requests){
-				requests.add(msg);	//Add itself to the request queue
+			}else{
 				writeRequests.add(msg); //Add itself to the write request queue
-				while(requests.peek() != msg)
+				while(requests.first() != msg)
 					try {
 						requests.wait();
 					} catch (InterruptedException e) {}
 			}
-			return;         //After it's notified and satisfies the requirements, it can enter the cs.
 		}
-
+		//After it's notified and satisfies the requirements, it can enter the cs.
+		//System.out.println("Allowed to enter the critical section ("+msg+")");
 	}
 	
 	/**
@@ -166,8 +196,13 @@ public class Server {
 		boolean write = false;
 		synchronized(requests){
 			//Remove its request from the queue firstly
-			if(write = (requests.poll().type == MessageType.CS_REQUEST_WRITE))
-				writeRequests.poll();
+			LinkedList<Message> list = requestsMap.get(pid);
+			assert(list != null);
+			Message msg = list.pollFirst();
+			assert(msg.clk.pid == pid);
+			requests.remove(msg);
+			if(write = (msg.type == MessageType.CS_REQUEST_WRITE))
+				writeRequests.remove(msg);
 		}
 		//Then tell every server that I want to release the critical section
 		broadCastMessage(new Message(MessageType.CS_RELEASE, null, null), true);
@@ -219,34 +254,47 @@ public class Server {
 	public static void onReceivingMessage(Message msg, ObjectOutputStream link) throws IOException{
 		updateClock(msg.clk); //Update the clock firstly.
 		switch(msg.type) {      //Add the message into the corresponding queue.
-		case CS_REQUEST_READ: 
-			//When receive the read request, add the request to the queue, then send back an acknowledgement.
-			synchronized(requests){
-				requests.add(msg);
-			}
-			link.writeObject(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
-			break;
-		case CS_REQUEST_WRITE:
-			//When receive the write request, add the request to the queue and write queue, then send back an acknowledgement.
-			synchronized(requests){
-				requests.add(msg);
-				writeRequests.add(msg);
-			}
-			link.writeObject(new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
-			break;
-		case CS_RELEASE:
-			//When receive release request, remove the request from the queue
-			synchronized(requests){
-				if(requests.poll().type == MessageType.CS_REQUEST_WRITE)
-					writeRequests.poll();
-				requests.notifyAll();
-			}
-			break;
-		default:
-			break;
+			case CS_REQUEST_READ: 
+				//When receive the read request, add the request to the queue, then send back an acknowledgement.
+				synchronized(requests){
+					requests.add(msg);
+					LinkedList<Message> list = requestsMap.get(msg.clk.pid);
+					if(list == null) requestsMap.put(msg.clk.pid, list = new LinkedList<Message>());
+					list.add(msg);
+				}
+				link.writeObject(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
+				break;
+			case CS_REQUEST_WRITE:
+				//When receive the write request, add the request to the queue and write queue, then send back an acknowledgement.
+				synchronized(requests){
+					if(!requests.isEmpty() && requests.first().clk.pid == pid)
+						assert(requests.first().compareTo(msg) < 0): requests.first()+" is larger than "+msg; 
+					requests.add(msg);
+					writeRequests.add(msg);
+					LinkedList<Message> list = requestsMap.get(msg.clk.pid);
+					if(list == null) requestsMap.put(msg.clk.pid, list = new LinkedList<Message>());
+					list.add(msg);
+				}
+				link.writeObject(new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
+				break;
+			case CS_RELEASE:
+				//When receive release request, remove the request from the queue
+				synchronized(requests){
+					LinkedList<Message> list = requestsMap.get(msg.clk.pid);
+					assert(list != null);
+					Message del = list.pollFirst();
+					requests.remove(del);
+					if(del.type == MessageType.CS_REQUEST_WRITE)
+						writeRequests.remove(del);
+					requests.notifyAll();
+				}
+				break;
+			default:
+				System.out.println(msg);
+				break;
 		}
 		
-		
+		link.flush();
 	}
 	
 	/**
@@ -276,65 +324,51 @@ public class Server {
 	 * @param args args[0] is the file where the server addresses and port# are defined.
 	 */
 	public static void main(String[] args){
-		/*try {
-			Server.init(args[0]);
-			new ClockUpdateThread(5000).start();
-			ServerSocket serversocket = new ServerSocket(clusterInfo.get(pid).port);
-			while(true)
-				new ServerThread(serversocket.accept()).start();
-			
-		} catch (IOException e) {
-			e.printStackTrace();
-			
-		}*/
-		
 		//Following code is for unit test
 		pid = Integer.parseInt(args[0]);
 		clock = new Clock(0, pid);
-		clusterInfo.put(0, new Process(0, "192.168.1.120", 12345, true));
-		clusterInfo.put(1, new Process(1, "192.168.1.120", 12346, true));
-		clusterInfo.put(2, new Process(2, "192.168.1.120", 12347, true));
-		clusterInfo.put(3, new Process(3, "192.168.1.120", 12348, true));
+		int n = Integer.parseInt(args[1]);
+		for(int i=0; i<n; i++)
+			clusterInfo.put(i, new Process(i, "192.168.1.120", 12345+i, true));
 		try {
-			final ServerSocket seversocket = new ServerSocket(clusterInfo.get(pid).port);
-			Socket socket = seversocket.accept();
+			ServerSocket seversocket = new ServerSocket(clusterInfo.get(pid).port);
+			seversocket.accept();
 			System.out.println("let's start!");
+			seversocket.close();
 			new Thread(){
 				@Override
 				public void run(){
-					while(true)
-						try {
-							new ServerThread(seversocket.accept()).start();
-						} catch (IOException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						}
+					try {
+						Server.init(null);
+					} catch (IOException e) {
+					}
 				}
 			}.start();
-			socket.close();
-		} catch (IOException e1) {
-			e1.printStackTrace();
-		}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}	
 		try {
-			Thread.sleep(3000);
+			Thread.sleep(1000);
 		} catch (InterruptedException e1) {
 			// TODO Auto-generated catch block
 			e1.printStackTrace();
 		}
 		for(Process p : clusterInfo.values())
 			try{
+				if(p.pid < pid)
 				p.connect();
 			}catch(Exception e){}
-		
-		try {
-			Thread.sleep(3000);
-		} catch (InterruptedException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}
-		for(int i=0; i<1000; i++){
-			try {			
+		for(int i=0; i<50; i++){
+			try {		
+					assert(requests.isEmpty() || requests.first().clk.pid!=pid);
 					requestCritialSection(false);
+					assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
+					/*System.out.println("The first one in request queue is:");
+					synchronized(requests){
+						System.out.println(requests.peek());
+					}*/
+				//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
+				//	Thread.sleep(1);
 					File testFile = new File("E:\\USA\\courses\\Distributed System\\test\\test.txt");
 					BufferedReader br = new BufferedReader(new FileReader(testFile));
 					int read = Integer.parseInt(br.readLine());
@@ -344,13 +378,20 @@ public class Server {
 					BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
 					writer.write(""+(read+1));
 					writer.close();
+				//	System.out.println("Process "+pid+" leave CS"+" at "+System.currentTimeMillis()%10000);
+					assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid+". clock="+clock;
 					releaseCritialSection();	
-			} catch (IOException e) {
+					assert(requests.isEmpty() || requests.first().clk.pid!=pid);
+			} catch (Exception e) {
 				e.printStackTrace();
+				System.out.println("The request queue is:");
+				synchronized(requests){
+					for(Message m : requests)
+						System.out.println(m);
+				}
 			}
-			
-
 		}
+		System.out.println("Test ends!");
 		
 	}
 }

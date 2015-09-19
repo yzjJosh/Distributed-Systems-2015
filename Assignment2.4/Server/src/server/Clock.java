@@ -32,5 +32,10 @@ public class Clock implements Comparable<Clock>, Serializable{
 		else if(timestamp > c.timestamp) return 1;
 		else return pid - c.pid;
 	}
+	
+	@Override
+	public String toString(){
+		return "(" + timestamp + ", " + pid + ")";
+	}
 
 }

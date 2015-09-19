@@ -35,4 +35,9 @@ public class Message implements Serializable, Comparable<Message> {
 		else
 			return 0;
 	}
+	
+	@Override
+	public String toString(){
+		return "[type="+type+", clk="+clk+", content="+content+"]";
+	}
 }

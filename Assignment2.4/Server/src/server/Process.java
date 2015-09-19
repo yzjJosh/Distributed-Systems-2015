@@ -1,6 +1,7 @@
 package server;
 
 import java.io.*;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 
@@ -16,7 +17,9 @@ public class Process {
 	private ObjectOutputStream send;		//The stream to send data to the server
 	private ObjectInputStream receive;		//The stream to receive data from server
 	public boolean live;					//If the server process live or dead.
-	private Object lock = new Object();
+	private ServerThread thread;			//The thread which listens to incoming messages from this process
+	private Object lock = new Object();		//The lock to make sure cocurrent performance
+	
 	
 	/**
 	 * Create a new process object
@@ -45,16 +48,33 @@ public class Process {
 	
 	
 	/**
-	 * Try to connect to that process
+	 * Try to connect to that process (Initiative connection)
 	 * @throws IOException If there is an error occurs
 	 */
+	@SuppressWarnings("resource")
 	public void connect() throws IOException{
-		synchronized(lock){
-			Socket socket = new Socket(ip, port);
-			socket.setSoTimeout(5000);
-			send = new ObjectOutputStream(socket.getOutputStream());
-			receive = new ObjectInputStream(socket.getInputStream());
-		}
+		Socket socket = new Socket(ip, port);
+		send = new ObjectOutputStream(socket.getOutputStream());
+		receive = new ObjectInputStream(socket.getInputStream());
+		thread = new ServerThread(receive, send);	//Create a server thread to listen to incoming messages.
+		thread.start();
+	}
+	
+	/**
+	 * Associate a connected socket to this process.(Passive connection)
+	 * @param socket A connected socket
+	 * @throws IOException If the ip or port of this socket does not match this process, or the socket is closed.
+	 */
+	public void connect(Socket socket) throws IOException{
+		InetSocketAddress addr = (InetSocketAddress)socket.getRemoteSocketAddress();
+		if(!ip.equals(addr.getHostName()) || addr.getPort() != port)
+			throw new IOException("Ip and port does not match: "+addr+", which should be "+ip+":"+port);
+		if(socket.isClosed())
+			throw new IOException("Socket is closed!");
+		send = new ObjectOutputStream(socket.getOutputStream());
+		receive = new ObjectInputStream(socket.getInputStream());
+		thread = new ServerThread(receive, send);	//Create a server thread to listen to incoming messages.
+		thread.start();
 	}
 	
 	/**
@@ -62,31 +82,41 @@ public class Process {
 	 * @param msg The message
 	 * @throws IOException If there is an error occurs
 	 */
-	public void sendMessage(Message msg) throws IOException{
+	public synchronized void sendMessage(Message msg) throws IOException{
 		if(send == null)
 			throw new IOException("Process is not connected!");
-		synchronized(lock){
 			send.writeObject(msg);
-		}
+			send.flush();
 	}
 	
 	/**
 	 * Receive a message from this process. This method is blocking. If no message received after 5s, a SocketTimeoutException
 	 * will be thrown.
 	 * @return The received message
-	 * @throws IOException If there is an io error occurs
+	 * @throws SocketTimeoutException If no message received on time
+	 * @throws IOException When the process is not connected
 	 */
-	public Message receiveMessage() throws IOException{
-		if(receive == null)
+	public synchronized Message receiveMessage() throws IOException{
+		if(receive == null || thread == null)
 			throw new IOException("Process is not connected!");
 		Message ret = null;
-		synchronized(lock){
-			try {
-				ret = (Message)receive.readObject();
-			} catch (ClassNotFoundException e) {
-				e.printStackTrace();
+		final Thread waitThread = Thread.currentThread();
+		Thread monitor = new Thread(){
+			@Override
+			public void run(){
+				try {
+					Thread.sleep(5000);
+					waitThread.interrupt();
+				} catch (InterruptedException e) {}	
 			}
+		};
+		monitor.start();
+		try {
+			ret = thread.waitForMessage();
+		} catch (InterruptedException e) {
+			throw new SocketTimeoutException();
 		}
+		monitor.interrupt();
 		return ret;
 	}
 }
