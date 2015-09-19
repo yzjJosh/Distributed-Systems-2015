@@ -26,53 +26,58 @@ public class Server {
 	private static final int MAX_READER_IN_A_SERVER = 20;	//Maximum number of concurent readers in each server.
 	private static Semaphore read_write_lock = new Semaphore(MAX_READER_IN_A_SERVER);	//The read-write lock
 	private static TheaterService service = new TheaterService(pid);
+	private static File file = null;
 	
 	/**
 	 * Initialize the server process with an info file.
 	 * @param infoFile The file where ips and ports are defined.
 	 * @throws IOException If there is an error when reading the file.
 	 */
-	private static void init(String path) throws IOException {
-		/*try {
-
-			BufferedReader br = new BufferedReader(new FileReader(path));
-			StringBuffer sb = new StringBuffer();
-			String server = br.readLine();
-			while (server != null) {
-				// Extract the ip and port information from the line.
-				String[] splits = server.split(" ");
-				String ip = splits[0];
-				int port = Integer.parseInt(splits[1]);
-				// Try to find out if the server is alive by sending an ack and
-				// check if the sender server can receive a response in time.
-				try {
-					Socket socket = new Socket(ip, port);
-					socket.setSoTimeout(5 * 1000); // set the timeout to 5s
-					sendMessage(socket, new Message(MessageType.SERVER_SYNC, null, updateClock()));
-					ObjectInputStream reader = new ObjectInputStream(
-							socket.getInputStream());
-					reader.readObject();
-					socket.close();
-					// Timeout Exception doesn't happen, so this server is
-					// alive.
-					Process state = new Process(pid, socket, true);
-					clusterInfo.put(pid, state);
-				} catch (UnknownHostException e) {
-				} catch (SocketTimeoutException e) {
-					// Timeout Exception happens, so this server is not alive
-					Process state = new Process(pid, null, false);
-					clusterInfo.put(pid, state);
-				} catch (ClassNotFoundException e) {
-					e.printStackTrace();
-				}
-				// Read the next server information.
-				br.readLine();
-
+	private static void init(String path) {
+		file = new File(path);
+		BufferedReader reader = null;
+		Process process = null;
+		int i = 0;
+	
+			try {
+				reader = new BufferedReader(new FileReader(file));
+			} catch (FileNotFoundException e) {
+				e.printStackTrace();
 			}
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		}*/
-	}
+			String serverInfo;
+			String[] splits = null;
+			String ip = null;
+			int port = 0;
+			try {
+				while ((serverInfo = reader.readLine()) != null) {
+					//Split the serverInfo to get the host and port.
+					splits = serverInfo.split(" ");
+					ip = splits[0];
+					port = Integer.parseInt(splits[1]);
+					// Try to find out if the server is alive by sending an ack and
+					// check if the sender server can receive a response in time.
+					process = new Process(i, ip, port, true);
+					try {
+						process.connect();						
+						clusterInfo.put(i, process);
+					}catch (SocketTimeoutException e) {
+						process = new Process(i, ip, port, false);
+						clusterInfo.put(i, process);			
+					}
+				    i++;
+				}
+			} catch (NumberFormatException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+	
+	
+		}
+	
+	
 	
 	/**
 	 * Request critial section access. If critial section is unavailable, block the thread until it becomes available.
@@ -343,6 +348,7 @@ public class Server {
 		//Following code is for unit test
 		pid = Integer.parseInt(args[0]);
 		clock = new Clock(0, pid);
+		init("servers.txt");
 		clusterInfo.put(0, new Process(0, "192.168.1.120", 12345, true));
 		clusterInfo.put(1, new Process(1, "192.168.1.120", 12346, true));
 		clusterInfo.put(2, new Process(2, "192.168.1.120", 12347, true));

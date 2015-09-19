@@ -26,30 +26,40 @@ public class Client extends JFrame {
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
 	private static final HashMap<Integer, Process> clusterInfo = new HashMap<Integer, Process>(); //Pid to every srever's state in the cluster.
 	private JTextField messageField;
-	private RandomAccessFile serversInfo = null;
+	private File file = null;
 	private Process server = null;
 	/**
-	 * Read a random server information from the specified file
-	 * @param path
+	 * Read the server information from the specified file
+	 * @param path the file path
 	 */
-//	public void ReadServerInfo(String path){
-//		try {
-//			serversInfo = new RandomAccessFile(path, "r");
-//			String server;
-//			try {
-//				server = serversInfo.readLine();
-//				String[] splits = server.split(" ");
-//			    host = splits[0];
-//			    port = Integer.parseInt(splits[1]);
-//			} catch (IOException e) {
-//				// TODO Auto-generated catch block
-//				e.printStackTrace();
-//			}
-//				
-//		} catch (FileNotFoundException e) {
-//			e.printStackTrace();
-//		}
-//	}
+	public void readServerInfo(String path) {
+		file = new File(path);
+		BufferedReader reader = null;
+		try {
+			reader = new BufferedReader(new FileReader(file));
+			String serverInfo;
+			int i = 0;
+			while ((serverInfo = reader.readLine()) != null) {
+				//Split the serverInfo to get the host and port.
+				String[] splits = serverInfo.split(" ");
+				String ip = splits[0];
+				int port = Integer.parseInt(splits[1]);
+				Process process = new Process(i, ip, port, false);
+				clusterInfo.put(i, process);
+				i++;
+			}
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			if (reader != null) {
+				try { //Close the reader.
+					reader.close();
+				} catch (IOException e1) {
+				}
+			}
+		}
+	}
 	/**
 	 * Constructor
 	 * @throws Exception
@@ -111,6 +121,7 @@ public class Client extends JFrame {
 		int chosenServer = new Random().nextInt(clusterInfo.size());
 		server = clusterInfo.get(chosenServer);
 		server.connect();
+		server.live = true;
 		} catch(IOException e) {
 			//The connection failed, make the live tag false and reconnect
 			server.live = false;
@@ -137,6 +148,8 @@ public class Client extends JFrame {
 	}
 	public static void main(String[] args) throws Exception{
 		Client client = new Client();
+		String path = "servers.txt";
+		client.readServerInfo(path);
 		client.connectToServer();
 		while(true) {
 			client.refreshMessage();
