@@ -1,13 +1,2 @@
-<<<<<<< Updated upstream
 /client
-/exceptions
-/message
 /server
-=======
-/.DS_Store
-/client/
-/exceptions/
-/message/
-/server/
->>>>>>> Stashed changes
-/servers.txt

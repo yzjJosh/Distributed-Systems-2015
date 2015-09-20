@@ -44,6 +44,9 @@ public class ServerThread extends Thread {
 		try {
 			while(true){			
 				Message msg = (Message)istream.readObject();	//Listen to messages
+				synchronized(process){
+					if(!process.live) break;
+				}
 				Server.onReceivingMessage(msg, process);	//Throw the new message to server for response
 				synchronized(waitingQueues){
 					for(LinkedBlockingQueue<Message> q: waitingQueues)
