@@ -1,5 +1,9 @@
 package exceptions;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
+
 
 
 
@@ -11,7 +15,7 @@ public class RepeateReservationException extends Exception {
 
 	
 	private static final long serialVersionUID = 1L;
-
+    public HashSet<Integer> reservedSeats = null;
 	/**
 	 * Create an empty exception.
 	 */
@@ -23,10 +27,11 @@ public class RepeateReservationException extends Exception {
 	
 	/**
 	 * Create an exception with a message.
-	 * @param s The message.
+	 * @param set The message.
 	 */
-	public RepeateReservationException(String s){
-		super(s);
+	public RepeateReservationException(Set<Integer> set){
+		super();
+		reservedSeats = (HashSet) set;
 	}
 
 }
