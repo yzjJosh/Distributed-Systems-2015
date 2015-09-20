@@ -201,7 +201,7 @@ public class Client extends JFrame {
 						Message reply = null;
 						try {
 							reply =  client.server.receiveMessage();
-							client.messageArea.setText((String)reply.content + '\n');
+							client.messageArea.append((String)reply.content + '\n');
 						} catch (IOException e) {
 							break;
 						}

@@ -439,7 +439,7 @@ public class Server {
 					//The reservation is repeated
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! You have reserved the seats! " + e.reservedSeats, null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry, " +contents[0] +  ". You have reserved the seats: " + e.reservedSeats, null));
 					process.message_event_unlock();
 					System.out.println("Repeated reservation!");
 				}
@@ -455,7 +455,7 @@ public class Server {
 					Set <Integer> seats = service.search((String)msg.content);
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Hello! " +  "Mr/Ms " + (String)msg.content + "! Your reserved seats are " + seats.toString() + "\n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Hello! " +  "Mr/Ms " + (String)msg.content + "! Your reserved seats are " + seats.toString(), null));
 					process.message_event_unlock();
 					System.out.println("Search is successful!");
 				} catch (NoReservationInfoException e) {
@@ -478,7 +478,7 @@ public class Server {
 					int[] num = service.delete((String)msg.content);
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num[0] + "seats are released! " + "Number of Left seats is " + num[1] + " \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num[0] + "seats are released! " + "Number of Left seats is " + num[1] , null));
 					process.message_event_unlock();
 					System.out.println("Deletion is successful!");
 				} catch (NoReservationInfoException e) {
