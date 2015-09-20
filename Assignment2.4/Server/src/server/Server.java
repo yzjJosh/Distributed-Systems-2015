@@ -42,26 +42,12 @@ public class Server {
 	 * @param infoFile The file where ips and ports are defined.
 	 * @throws IOException If there is an error when reading the file.
 	 */
-<<<<<<< Updated upstream
+
 	private static void init(String path) throws IOException, FileNotFoundException{
 		
 		//Read the cluster information from a file.
 		int id = 0;
-=======
-	private static void init(String path) throws IOException {
-		file = new File(path);
-		BufferedReader reader = null;
-		Process process = null;
-		int i = 0;
-	 
-		try {
-			reader = new BufferedReader(new FileReader(file));
-		} catch (FileNotFoundException e) {
-			 System.out.println("gggggg");
-			e.printStackTrace();
-		}
-	
->>>>>>> Stashed changes
+
 		String serverInfo;
 		BufferedReader reader = new BufferedReader(new FileReader(new File(path)));
 		while ((serverInfo = reader.readLine()) != null) {
@@ -475,7 +461,7 @@ public class Server {
 	 * @throws FileNotFoundException 
 	 */
 	public static void main(String[] args){
-<<<<<<< Updated upstream
+
 		final String file = args[0];
 		new Thread(){
 			@Override
@@ -497,21 +483,17 @@ public class Server {
 		} catch (InterruptedException e2) {
 			e2.printStackTrace();
 		}
+
 	
-=======
-		//Following code is for unit test
-//		pid = Integer.parseInt(args[0]);
-//		clock = new Clock(0, pid);
-//		int n = Integer.parseInt(args[1]);
-		pid = 1;
-		try {
-			System.out.println("Test ends!");
-			Server.init("/Users/mackbook/Distributed_System/Distributed-Systems-2015/Assignment2.4/Server/servers.txt");
-		} catch (IOException e2) {
-           System.out.println("ss");
-		}
-		System.out.println("Test ends!");
->>>>>>> Stashed changes
+//		pid = 1;
+//		try {
+//			System.out.println("Test ends!");
+//			Server.init("/Users/mackbook/Distributed_System/Distributed-Systems-2015/Assignment2.4/Server/servers.txt");
+//		} catch (IOException e2) {
+//           System.out.println("ss");
+//		}
+//		System.out.println("Test ends!");
+
 		try {
 			ServerSocket seversocket = new ServerSocket(45678 + pid);
 			seversocket.accept();
@@ -520,7 +502,7 @@ public class Server {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}	
-<<<<<<< Updated upstream
+
 
 		for(int i=0; i<50; i++){
 			try {		
@@ -556,21 +538,7 @@ public class Server {
 				}
 			}
 		}
-=======
-		System.out.println("Test ends!");
-		try {
-			Thread.sleep(1000);
-		} catch (InterruptedException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}
-		System.out.println("Test ends!");
-		for(Process p : clusterInfo.values())
-			try{
-				if(p.pid < pid)
-				p.connect();
-			}catch(Exception e){}
->>>>>>> Stashed changes
+
 		System.out.println("Test ends!");
 //		for(int i=0; i<50; i++){
 //			try {		
