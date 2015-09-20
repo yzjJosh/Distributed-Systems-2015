@@ -5,6 +5,7 @@ import java.awt.FlowLayout;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 import javax.swing.JTextField;
@@ -52,7 +53,7 @@ public class Reserve extends JDialog {
 		contentPanel.add(lblYourName);
 		
 		JLabel lblReservationCount = new JLabel("Reservation Count:");
-		lblReservationCount.setBounds(254, 143, 134, 16);
+		lblReservationCount.setBounds(54, 143, 134, 16);
 		contentPanel.add(lblReservationCount);
 		{
 			JPanel buttonPane = new JPanel();
@@ -63,6 +64,9 @@ public class Reserve extends JDialog {
 				//Start to send the name and count to the server
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
+						while(nameField.getText() == null || countField.getText() == null) {
+							JOptionPane.showMessageDialog(null,"There is null field!!");
+						}
 						String data = nameField.getText() + " " + countField.getText();
 						Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
 						try {

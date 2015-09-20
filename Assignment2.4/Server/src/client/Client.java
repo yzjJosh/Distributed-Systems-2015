@@ -20,6 +20,7 @@ import javax.swing.JTextArea;
 import java.awt.Color;
 import java.awt.Font;
 import javax.swing.ImageIcon;
+import java.awt.SystemColor;
 public class Client extends JFrame {
 
 	private static final long serialVersionUID = 1L;
@@ -116,15 +117,17 @@ public class Client extends JFrame {
 		getContentPane().add(btnDelete);
 		
 		JLabel lblWelcomeToUse = new JLabel("Welcome to use the client reservation system!");
+		lblWelcomeToUse.setForeground(Color.WHITE);
 		lblWelcomeToUse.setFont(new Font("Avenir Next", Font.BOLD, 15));
 		lblWelcomeToUse.setBounds(78, 22, 414, 25);
 		getContentPane().add(lblWelcomeToUse);
 		
 		JLabel lblFromServerSystem = new JLabel("From server system:");
+		lblFromServerSystem.setForeground(Color.WHITE);
 		lblFromServerSystem.setFont(new Font("Helvetica", Font.BOLD, 13));
 		lblFromServerSystem.setBounds(231, 66, 147, 16);
 		getContentPane().add(lblFromServerSystem);
-		messageArea.setBackground(Color.GRAY);
+		messageArea.setBackground(SystemColor.textHighlight);
 		
 		
 		messageArea.setBounds(26, 26, 295, 162);
@@ -137,7 +140,7 @@ public class Client extends JFrame {
 		
 		JLabel lblNewLabel = new JLabel("New label");
 		lblNewLabel.setIcon(new ImageIcon("/Users/mackbook/Distributed_System/Distributed-Systems-2015/Assignment2.4/Server/Stars.jpg"));
-		lblNewLabel.setBounds(16, 31, 61, 16);
+		lblNewLabel.setBounds(0, 0, 568, 290);
 		getContentPane().add(lblNewLabel);
 		
 	}
