@@ -8,23 +8,12 @@ import javax.swing.JFrame;
 import javax.swing.JButton;
 import javax.swing.JScrollPane;
 
-import java.awt.EventQueue;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 
 import javax.swing.JLabel;
 
-import com.sun.xml.internal.ws.message.stream.OutboundStreamHeader;
-
-import javax.swing.JTextField;
-
 import message.Message;
-import message.MessageFilter;
-import message.MessageType;
-import server.ClockUpdateThread;
-import server.Server;
-import server.Process;
-import server.ServerThread;
 
 import javax.swing.JTextArea;
 
@@ -32,6 +21,9 @@ import java.awt.Color;
 import java.awt.Font;
 import javax.swing.ImageIcon;
 public class Client extends JFrame {
+
+	private static final long serialVersionUID = 1L;
+	
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
 	private static final HashMap<Integer, ProcessForClient> clusterInfo = new HashMap<Integer, ProcessForClient>(); //Pid to every srever's state in the cluster.
@@ -153,21 +145,23 @@ public class Client extends JFrame {
 	 * Randomly choose a server to connect
 	 */
 	public void connectToServer() {
-		try {
-			//Initialize the socket
-			//Choose a random live server to connect.
-		int chosenServer = new Random().nextInt(clusterInfo.size());
-		server = clusterInfo.get(chosenServer);
-		System.out.println("BeforeConnect:  " + (server == null) + server);
-		
-		server.connect();
-		System.out.println("Connect success!!!!!!");
-		server.live = true;
-		} catch(IOException e) {
-			//The connection failed, make the live tag false and reconnect
-			System.out.println("Connect Failed!  ");
-			server.live = false;
-			connectToServer();
+		while(true){
+			try {
+				//Initialize the socket
+				//Choose a random live server to connect.
+
+				int chosenServer = new Random().nextInt(clusterInfo.size());
+				server = clusterInfo.get(chosenServer);
+				System.out.println("Try to connect to " + server);
+				server.connect();
+				System.out.println("Connect success!!!!!!");
+				server.live = true;
+				break;
+			} catch(IOException e) {
+				//The connection failed, make the live tag false and reconnect
+				System.out.println("Connect Failed!  ");
+				server.live = false;
+			}
 		}
 	}
 	/**
@@ -185,27 +179,30 @@ public class Client extends JFrame {
 		//Message from the server is not null, show the message.
 		if(reply != null) {
 			String content = (String) reply.content;
-			messageArea.setText(content);;			
+			messageArea.setText(content);			
 		}
 	}
+	
 	public static void main(String[] args) throws Exception{
 		final Client client = new Client();
 		String path = "servers.txt";
 		client.readServerInfo(path);
+
+		System.out.println(client.clusterInfo);
 		new Thread() {
-			@Override
-			public void run() {
-				while (true) {
+			@Override 
+			public void run(){
+				while(true){
 					client.connectToServer();
-					while (true) {
+					while(true){
 						Message reply = null;
 						try {
-							reply = client.server.receiveMessage();
-							client.messageArea
-									.append((String) reply.content + '\n');
+							reply =  client.server.receiveMessage();
+							client.messageArea.setText((String)reply.content + '\n');
 						} catch (IOException e) {
 							break;
 						}
+						//System.out.println((String)reply.content);
 					}
 
 				}
