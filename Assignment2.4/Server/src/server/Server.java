@@ -3,6 +3,7 @@ package server;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.Map.Entry;
 import java.util.concurrent.Semaphore;
 
 import exceptions.NoEnoughSeatsException;
@@ -21,65 +22,112 @@ public class Server {
 	private static final TreeSet<Message> requests = new TreeSet<Message>();		  //The queue of waiting requests
 	private static final TreeSet<Message> writeRequests = new TreeSet<Message>();	  		//The queue of waiting write requests
 	private static final HashMap<Integer, LinkedList<Message>> requestsMap = new HashMap<Integer, LinkedList<Message>>(); //From pid to a request
+	private static TheaterService service = new TheaterService(pid);	//The theater service object
+	private static final int MAX_RESPONSE_TIME = 5000;	//The maximum response time of this system.
 	
 	//Synchronization locks
 	private static Object clock_lock = new Object();	//clock access mutex lock
 	private static final int MAX_READER_IN_A_SERVER = 20;	//Maximum number of concurent readers in each server.
 	private static Semaphore read_write_lock = new Semaphore(MAX_READER_IN_A_SERVER);	//The read-write lock
-	private static TheaterService service = new TheaterService(pid);
-	private static File file = null;
+	
+	/**
+	 *A thread that is good for synchronization
+	 */
+	private static class mThread extends Thread{
+		public Semaphore m = new Semaphore(0);
+	}
 	
 	/**
 	 * Initialize the server process with an info file.
 	 * @param infoFile The file where ips and ports are defined.
 	 * @throws IOException If there is an error when reading the file.
 	 */
-	private static void init(String path) throws IOException {
-		file = new File(path);
-		BufferedReader reader = null;
-		Process process = null;
-		int i = 0;
-	
-		try {
-			reader = new BufferedReader(new FileReader(file));
-		} catch (FileNotFoundException e) {
-			e.printStackTrace();
-		}
+	private static void init(String path) throws IOException, FileNotFoundException{
+		
+		//Read the cluster information from a file.
+		int id = 0;
 		String serverInfo;
-		String[] splits = null;
-		String ip = null;
-		int port = 0;
-		try {
-			while ((serverInfo = reader.readLine()) != null) {
-				//Split the serverInfo to get the host and port.
-				splits = serverInfo.split(" ");
-				ip = splits[0];
-				port = Integer.parseInt(splits[1]);
-				// Try to find out if the server is alive by sending an ack and
-				// check if the sender server can receive a response in time.
-				process = new Process(i, ip, port, true);
-				try {
-					process.connect();						
-					clusterInfo.put(i, process);
-				}catch (SocketTimeoutException e) {
-					process = new Process(i, ip, port, false);
-					clusterInfo.put(i, process);			
+		BufferedReader reader = new BufferedReader(new FileReader(new File(path)));
+		while ((serverInfo = reader.readLine()) != null) {
+			//Split the serverInfo to get the host and port.
+			String[] splits = serverInfo.split(" ");
+			String ip = splits[0];
+			int port = Integer.parseInt(splits[1]);	
+			clusterInfo.put(id, new Process(id, ip, port));
+			id++;
+		}
+		reader.close();
+		
+		//Get my pid.
+		ServerSocket serversocket = null;
+		for(Process process : clusterInfo.values())
+			if(process.ip.equals(InetAddress.getLocalHost().getHostAddress()))
+				try{
+					serversocket = new ServerSocket(process.port);
+					pid = process.pid;
+					break;
+				}catch(IOException e){}
+		if(serversocket == null)
+			throw new IOException("Unable to find available port!");
+		clock = new Clock(0, pid);	//Then initialize my clock
+		System.out.println("This server got pid "+pid);
+		
+		
+		//Try to find out if some servers are dead, and synchronize seate information
+		HashMap<Process, mThread> threads = new HashMap<Process, mThread>();
+		for(Process process : clusterInfo.values()){
+			if(process.pid == pid) continue;		
+			final Process p = process;
+			threads.put(p, new mThread(){	//Create new thread to wait for response
+				@Override public void run(){
+					try {
+						p.connect();	//Try to connect to a server
+						Message msg = p.waitMessage(new MessageFilter(){
+							@Override
+							public boolean filt(Message m) {
+								return m.type == MessageType.SERVER_SYNC_RESPONSE && m.clk.pid == p.pid;
+							}	
+						}, MAX_RESPONSE_TIME);	//Wait for p's response
+						assert(msg.type == MessageType.SERVER_SYNC_RESPONSE);
+
+						//TO-DO synchronize seate information here using the msg.content
+
+					} catch (IOException e) {
+						synchronized(p){
+							p.live = false;
+						}
+					}
+					m.release();
 				}
-				i++;
-			}
-		} catch (NumberFormatException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			});
+			threads.get(p).start();
 		}
 		
+		for(Entry<Process, mThread> entry : threads.entrySet()){
+			while(entry.getKey().live && entry.getValue().getState() != Thread.State.WAITING); //Wait until thread starts waiting
+			if(entry.getKey().live)
+				entry.getKey().sendMessage(new Message(MessageType.SERVER_SYNC, null, updateClock()));
+		}
+
+		//Wait until all threads have stopped
+		for(mThread thread : threads.values())
+			try {
+				thread.m.acquire();
+			} catch (InterruptedException e1) {
+				e1.printStackTrace();
+			}
+		
+		//Broadcast a confirmation to all servers so that they know this server is ready
+		broadCastMessage(new Message(MessageType.SERVER_SYNC_COMPLETE, null, null), true);
+		System.out.println("Synchronization success!");			
+		System.out.println("Cluster infomation:");
+		for(Process p : clusterInfo.values())
+			System.out.println(p+(p.pid==pid?" (Me)":""));
+		
+		
 		//After successfully initialize clusterInfo...
-		ServerSocket serversocket = null;
 		try {
 			new ClockUpdateThread(5000).start();	//Start the clock update thread
-			serversocket = new ServerSocket(clusterInfo.get(pid).port);	//Start the server socket, listening to new connections
 			while(true){	//Keep doing
 				Socket socket = serversocket.accept();	//Got a connection!
 				new ServerThread(socket).start();	//Create a new server thread to serve this client.
@@ -112,62 +160,53 @@ public class Server {
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
 		final Message msg = new Message(type, null, updateClock());	//The request message
-		class Lock{			
-			/**
-			 * The lock is used for synchronization purpose.
-			 * Whenever send a request, num++;
-			 * Whenever receive a ack or a server is believed to be dead, num--;
-			 * The main thread will wait until num==0. 
-			 */
-			public int num = 0;
-		}
-		
-		final Lock test = new Lock();
+
 		
 		//Send the requests to all other servers
-		class mThread extends Thread{
-			Semaphore m = new Semaphore(0);
-		}
 		LinkedList<mThread> l = new LinkedList<mThread>();
 		for(Process process : clusterInfo.values()){
 			if(!process.live || process.pid == pid) continue;
 			final Process p = process;
-			//l.add(new mThread(){
-			//	@Override
-			//	public void run(){
-					synchronized(p){
-						if(p.live){
-							try {
-								updateClock();
-								p.sendMessage(msg);	//Send request to a server
-								Message reply = p.receiveMessage(); //Wait for its ack reply for 5s.
-								updateClock(reply.clk);
-								assert(reply.type == ackType);
-								assert(reply.compareTo(msg) > 0);
-								assert(reply.clk.pid == p.pid);
-			//					synchronized(test){
-								test.num++;		
-				//				}
-							}catch (IOException e){
-								p.live = false;	//If no response, set it dead.
-								System.out.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", is dead");
-								e.printStackTrace();
+			l.add(new mThread(){
+				@Override
+				public void run(){
+					try {
+						Message reply = p.waitMessage(new MessageFilter(){
+							@Override
+							public boolean filt(Message m) {
+								return m.type == ackType && m.compareTo(msg) > 0 && m.clk.pid == p.pid;
 							}
+						}, MAX_RESPONSE_TIME); //Wait for its ack reply for 5s.
+						assert(reply.type == ackType) : reply;
+						assert(reply.compareTo(msg) > 0);
+						assert(reply.clk.pid == p.pid);
+					}catch (IOException e){
+						synchronized(p){
+							p.live = false;	//If no response, set it dead.
 						}
+						System.err.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", is dead");
 					}
-		//			m.release();
-		//		}
-		//	});
-		//	l.peekLast().start();
-			
-			
+					m.release();		
+				}
+			});
+			l.peekLast().start();
+			while(p.live && l.peekLast().getState() != Thread.State.WAITING);	//Wait until the thread starts waiting
+			updateClock();
+			try{
+				process.sendMessage(msg);
+			}catch(IOException e){
+				synchronized(process){
+					process.live = false;
+				}
+			}
 		}
+		
+		//Wait until all threads stopped.
 		for(mThread thread : l)
 			try {
 				thread.m.acquire();
-			} catch (InterruptedException e1) {
-				// TODO Auto-generated catch block
-				e1.printStackTrace();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
 			}
 		//---------------------------------------------------------------------------------------------------------------
 		//If enter this line, then congratulations! You have received acks from all lived servers
@@ -261,7 +300,6 @@ public class Server {
 	public static void onReceivingMessage(Message msg, ObjectOutputStream link) throws IOException{
 		updateClock(msg.clk); //Update the clock firstly.
 		switch(msg.type) {      //Add the message into the corresponding queue.
-		
 			case CS_REQUEST_READ: 
 				//When receive the read request, add the request to the queue, then send back an acknowledgement.
 				synchronized(requests){
@@ -270,23 +308,28 @@ public class Server {
 					if(list == null) requestsMap.put(msg.clk.pid, list = new LinkedList<Message>());
 					list.add(msg);
 				}
-				link.writeObject(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
+				synchronized(link){
+					link.writeObject(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
+				}
 				break;
+				
 			case CS_REQUEST_WRITE:
 				//When receive the write request, add the request to the queue and write queue, then send back an acknowledgement.
 				synchronized(requests){
-					if(!requests.isEmpty() && requests.first().clk.pid == pid)
-						assert(requests.first().compareTo(msg) < 0): requests.first()+" is larger than "+msg; 
+		//			if(!requests.isEmpty() && requests.first().clk.pid == pid)
+		//				assert(requests.first().compareTo(msg) < 0): requests.first()+" is larger than "+msg; 
 					requests.add(msg);
 					writeRequests.add(msg);
 					LinkedList<Message> list = requestsMap.get(msg.clk.pid);
 					if(list == null) requestsMap.put(msg.clk.pid, list = new LinkedList<Message>());
 					list.add(msg);
 				}
-				link.writeObject(new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
+				synchronized(link){
+					link.writeObject(new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
+				}
 				break;
+				
 			case CS_RELEASE:
-				//When receive release request, remove the request from the queue
 				synchronized(requests){
 					LinkedList<Message> list = requestsMap.get(msg.clk.pid);
 					assert(list != null);
@@ -297,6 +340,7 @@ public class Server {
 					requests.notifyAll();
 				}
 				break;
+				
 			case RESERVE_SEAT:    //When receiving a reserve request, to execute the following service.
 				//enter cs
 				requestCriticalSection(false);
@@ -304,49 +348,84 @@ public class Server {
 				try {
 					//Reservation is successful
 					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
-					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT,  (Serializable) seats, null));
+					synchronized(link){
+						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT,  (Serializable) seats, null));
+					}
 				} catch (NumberFormatException e) {
 					
 				} catch (NoEnoughSeatsException e) {
 					//There is not enough seats
-					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					synchronized(link){
+						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					}
 				} catch (RepeateReservationException e) {
 					//The reservation is repeated
-					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					synchronized(link){
+						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					}
 				}
 				//release cs
 				releaseCriticalSection();
 				break;
+				
 			case SEARCH_SEAT:
 				//Enter cs as a reader
 				requestCriticalSection(true);
 				try {
 					Set <Integer> seats = service.search((String)msg.content);
-					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
+					synchronized(link){
+						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
+					}
 				} catch (NoReservationInfoException e) {
-					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					synchronized(link){
+						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					}
 				}
 				//Leave cs
 				releaseCriticalSection();
 				break;
+				
 			case DELETE_SEAT:
 				//Enter cs as  a writer
 				requestCriticalSection(false);
 				try {
 					//num = the number of the released seats
 					int num = service.delete((String)msg.content);
-					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
+					synchronized(link){
+						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
+					}
 				} catch (NoReservationInfoException e) {
-					link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					synchronized(link){
+						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					}
 				}
 				//Leave cs
 				releaseCriticalSection();
-				break;					
+				break;	
+			
+			case SERVER_SYNC:
+				//Send back the seate information to the sync server.
+				synchronized(link){
+					link.writeObject(new Message(MessageType.SERVER_SYNC_RESPONSE, null, updateClock()));
+				}
+				break;
+
+			case SERVER_SYNC_COMPLETE:
+				Process p = clusterInfo.get(msg.clk.pid);
+				assert(p!=null);
+				synchronized(p){
+					assert(!p.live);
+					p.live = true;	//That server is ready, so add it to the system.
+					p.associate((ServerThread)Thread.currentThread());
+				}
+				System.out.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", added to this system");
+				break;
 			default:
 				break;
 		}
-		
-		link.flush();
+		synchronized(link){
+			link.flush();
+		}
 	}
 	
 	/**
@@ -357,16 +436,18 @@ public class Server {
 	 */
 	public static void broadCastMessage(Message msg, boolean usingCurTimestamp){
 		for(Process process : clusterInfo.values()){
-			if(!process.live || process.pid == pid) continue;
-			try {
-				if(usingCurTimestamp)
-					process.sendMessage(new Message(msg.type, msg.content, updateClock()));
-				else{
-					updateClock();
-					process.sendMessage(msg);
+			synchronized(process){
+				if(!process.live || process.pid == pid) continue;
+				try {
+					if(usingCurTimestamp)
+						process.sendMessage(new Message(msg.type, msg.content, updateClock()));
+					else{
+						updateClock();
+						process.sendMessage(msg);
+					}
+				} catch (UnknownHostException e) {
+				} catch (IOException e) {
 				}
-			} catch (UnknownHostException e) {
-			} catch (IOException e) {
 			}
 		}
 	}
@@ -374,42 +455,40 @@ public class Server {
 	/**
 	 * Entrance of the server process.
 	 * @param args args[0] is the file where the server addresses and port# are defined.
+	 * @throws IOException 
+	 * @throws FileNotFoundException 
 	 */
 	public static void main(String[] args){
-		//Following code is for unit test
-		pid = Integer.parseInt(args[0]);
-		clock = new Clock(0, pid);
-		int n = Integer.parseInt(args[1]);
-		for(int i=0; i<n; i++)
-			clusterInfo.put(i, new Process(i, "192.168.1.120", 12345+i, true));
+		final String file = args[0];
+		new Thread(){
+			@Override
+			public void run(){
+				try {
+					init(file);
+				} catch (FileNotFoundException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+		}.start();
+		
 		try {
-			ServerSocket seversocket = new ServerSocket(clusterInfo.get(pid).port);
+			Thread.sleep(5000);
+		} catch (InterruptedException e2) {
+			e2.printStackTrace();
+		}
+	
+		try {
+			ServerSocket seversocket = new ServerSocket(45678 + pid);
 			seversocket.accept();
 			System.out.println("let's start!");
 			seversocket.close();
-			new Thread(){
-				@Override
-				public void run(){
-					try {
-						Server.init(null);
-					} catch (IOException e) {
-					}
-				}
-			}.start();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}	
-		try {
-			Thread.sleep(1000);
-		} catch (InterruptedException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}
-		for(Process p : clusterInfo.values())
-			try{
-				if(p.pid < pid)
-				p.connect();
-			}catch(Exception e){}
 
 		for(int i=0; i<50; i++){
 			try {		
@@ -422,7 +501,7 @@ public class Server {
 					}*/
 				//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
 				//	Thread.sleep(1);
-					File testFile = new File("E:\\USA\\courses\\Distributed System\\test\\test.txt");
+					File testFile = new File("E:\\USA\\courses\\Distributed_System\\test\\test.txt");
 					BufferedReader br = new BufferedReader(new FileReader(testFile));
 					int read = Integer.parseInt(br.readLine());
 					br.close();

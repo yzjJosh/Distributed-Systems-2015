@@ -15,5 +15,7 @@ public enum MessageType {
 	SEARCH_SEAT,			//The message used for a client to request the server to search seats reserved by a name.
 	DELETE_SEAT ,			//The message used for a client to request the server to release seats reserved by a name.
 	RESPOND_TO_CLIENT,		//The message used for server to respond to a client.
-	SERVER_SYNC				//The message used for server to sychronize seats information with other servers.			
+	SERVER_SYNC,			//The message used for server to sychronize seats information with other servers.
+	SERVER_SYNC_RESPONSE,	//The message used for server to respond to a SERVER_SYNC
+	SERVER_SYNC_COMPLETE	//The message used for server to comfirm that sychronization is completed
 }

@@ -21,7 +21,7 @@ public class ClockUpdateThread extends Thread {
 	public void run(){
 		try {
 			while(true){
-				Server.broadCastMessage(new Message(MessageType.CLOCK_MESSAGE, null, null), true);		
+		//		Server.broadCastMessage(new Message(MessageType.CLOCK_MESSAGE, null, null), true);		
 				Thread.sleep(period);
 			}
 		} catch (InterruptedException e) {

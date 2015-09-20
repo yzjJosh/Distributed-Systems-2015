@@ -2,8 +2,10 @@ package server;
 
 import java.io.*;
 import java.net.*;
+import java.util.*;
+import java.util.concurrent.LinkedBlockingQueue;
 
-import message.Message;
+import message.*;
 
 /**
  * Server thread is the thread where server runs. It waits for requests from clients and handle it.
@@ -11,21 +13,10 @@ import message.Message;
  */
 public class ServerThread extends Thread {
 	
-	private final ObjectInputStream istream; //The input stream
-	private final ObjectOutputStream ostream; //The output stream
-	private Message prevMessage = new Message(null, null, null);	//The previously received message
-	private Object lock = new Object();	//The lock
-	
-	
-	/**
-	 * Initialize a sever thread with a socket.
-	 * @param socket The socket.
-	 * @throws IOException If cannot initialize this thread due to an io error
-	 */
-	public ServerThread(Socket socket) throws IOException{
-		this.istream = new ObjectInputStream(socket.getInputStream());
-		this.ostream = new ObjectOutputStream(socket.getOutputStream());
-	}
+	final ObjectInputStream istream; //The input stream
+	final ObjectOutputStream ostream; //The output stream
+	Process process; //The process associated
+	final private HashSet<LinkedBlockingQueue<Message>> waitingQueues = new HashSet<LinkedBlockingQueue<Message>>();
 	
 	/**
 	 * Initialize a server thread with a socket input and output stream.
@@ -35,24 +26,46 @@ public class ServerThread extends Thread {
 	public ServerThread(ObjectInputStream istream, ObjectOutputStream ostream){
 		this.istream = istream;
 		this.ostream = ostream;
+		this.process = null;
 	}
+	
+	/**
+	 * Initialize a sever thread with a socket.
+	 * @param socket The socket.
+	 * @throws IOException If cannot initialize this thread due to an io error
+	 */
+	public ServerThread(Socket socket) throws IOException{
+		this(new ObjectInputStream(socket.getInputStream()), new ObjectOutputStream(socket.getOutputStream()));
+	}
+	
 	
 	@Override
 	public void run(){
-		System.out.println("Server thread "+Thread.currentThread().getId()+", starts.");
+		System.out.println("Server thread "+Thread.currentThread().getId()+", starts."+(process==null?"":"(Associated with process "+process.pid+")"));
 		try {
 			while(true){			
 				Message msg = (Message)istream.readObject();	//Listen to messages
-				synchronized(lock){
-					prevMessage = msg;			//Put new message
-					lock.notifyAll();	//Notify all threads waiting for new message
+				Server.onReceivingMessage(msg, ostream);	//Throw the new message to server for response
+				synchronized(waitingQueues){
+					for(LinkedBlockingQueue<Message> q: waitingQueues)
+						try {
+							q.put(msg);
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+						}
 				}
-				Server.onReceivingMessage(prevMessage, ostream);	//Throw the new message to server for response
 			}
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {}
 		System.err.println("Server thread "+Thread.currentThread().getId()+" terminates.");
+		if(process != null)
+			synchronized(process){
+				if(process.live){
+					process.live = false;
+					System.err.println("pid="+process.pid+", addr="+process.ip+":"+process.port+", is dead");
+				}
+			}
 	}
 	
 	/**
@@ -61,17 +74,16 @@ public class ServerThread extends Thread {
 	 * @return The next message received
 	 * @throws InterruptedException If the waiting thread is interrupted.
 	 */
-	public Message waitForMessage() throws InterruptedException{
+	public Message waitForMessage(MessageFilter filter) throws InterruptedException{
+		LinkedBlockingQueue<Message> mQueue = new LinkedBlockingQueue<Message>();
+		synchronized(waitingQueues){
+			waitingQueues.add(mQueue);
+		}
 		Message ret = null;
-		synchronized(lock){
-			ret = prevMessage;
-			try {
-				lock.wait();
-			} catch (InterruptedException e) {
-				if(ret == prevMessage)
-					throw e;
-			}
-			ret = prevMessage;
+		while(!filter.filt(ret = mQueue.take()));
+			
+		synchronized(waitingQueues){
+			waitingQueues.remove(mQueue);
 		}
 		return ret;
 	}

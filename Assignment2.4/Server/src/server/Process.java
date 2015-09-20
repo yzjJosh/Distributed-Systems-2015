@@ -5,7 +5,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 
-import message.Message;
+import message.*;
 
 
 /**
@@ -57,24 +57,22 @@ public class Process {
 		send = new ObjectOutputStream(socket.getOutputStream());
 		receive = new ObjectInputStream(socket.getInputStream());
 		thread = new ServerThread(receive, send);	//Create a server thread to listen to incoming messages.
+		thread.process = this;
 		thread.start();
 	}
 	
 	/**
-	 * Associate a connected socket to this process.(Passive connection)
-	 * @param socket A connected socket
-	 * @throws IOException If the ip or port of this socket does not match this process, or the socket is closed.
+	 * Associate a working serverThread to this process.
+	 * @param thread A working server thread
 	 */
-	public void connect(Socket socket) throws IOException{
-		InetSocketAddress addr = (InetSocketAddress)socket.getRemoteSocketAddress();
-		if(!ip.equals(addr.getHostName()) || addr.getPort() != port)
-			throw new IOException("Ip and port does not match: "+addr+", which should be "+ip+":"+port);
-		if(socket.isClosed())
-			throw new IOException("Socket is closed!");
-		send = new ObjectOutputStream(socket.getOutputStream());
-		receive = new ObjectInputStream(socket.getInputStream());
-		thread = new ServerThread(receive, send);	//Create a server thread to listen to incoming messages.
-		thread.start();
+	public void associate(ServerThread thread){
+		assert(thread != null);
+		assert(thread.process == null);
+		send = thread.ostream;
+		receive = thread.istream;
+		this.thread = thread;
+		thread.process = this;
+		System.out.println("Server thread "+thread.getId()+" is associated with process "+pid+".");
 	}
 	
 	/**
@@ -82,21 +80,25 @@ public class Process {
 	 * @param msg The message
 	 * @throws IOException If there is an error occurs
 	 */
-	public synchronized void sendMessage(Message msg) throws IOException{
+	public void sendMessage(Message msg) throws IOException{
 		if(send == null)
 			throw new IOException("Process is not connected!");
-			send.writeObject(msg);
-			send.flush();
+			synchronized(send){
+				send.writeObject(msg);
+				send.flush();
+			}
 	}
 	
 	/**
-	 * Receive a message from this process. This method is blocking. If no message received after 5s, a SocketTimeoutException
+	 * Wait for a specific knid of message from this process for certain number of time. This method is blocking. If no such message received on time, a SocketTimeoutException
 	 * will be thrown.
+	 * @param filter The filter to filt specified message
+	 * @param time The waiting time in ms
 	 * @return The received message
 	 * @throws SocketTimeoutException If no message received on time
 	 * @throws IOException When the process is not connected
 	 */
-	public synchronized Message receiveMessage() throws IOException{
+	public synchronized Message waitMessage(final MessageFilter filter, final int time) throws IOException{
 		if(receive == null || thread == null)
 			throw new IOException("Process is not connected!");
 		Message ret = null;
@@ -105,18 +107,23 @@ public class Process {
 			@Override
 			public void run(){
 				try {
-					Thread.sleep(5000);
+					Thread.sleep(time);
 					waitThread.interrupt();
 				} catch (InterruptedException e) {}	
 			}
 		};
 		monitor.start();
 		try {
-			ret = thread.waitForMessage();
+			ret = thread.waitForMessage(filter);
 		} catch (InterruptedException e) {
 			throw new SocketTimeoutException();
 		}
 		monitor.interrupt();
 		return ret;
+	}
+	
+	@Override
+	public String toString(){
+		return "Process "+pid+": addr="+ip+":"+port+", live="+live+", threadId="+(thread==null?null:thread.getId());
 	}
 }

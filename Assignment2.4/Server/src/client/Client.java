@@ -17,6 +17,8 @@ import com.sun.xml.internal.ws.message.stream.OutboundStreamHeader;
 import javax.swing.JTextField;
 
 import message.Message;
+import message.MessageFilter;
+import message.MessageType;
 import server.ClockUpdateThread;
 import server.Server;
 import server.Process;
@@ -136,7 +138,14 @@ public class Client extends JFrame {
 	public void refreshMessage() {
 		Message reply = null;
 		try {
-			reply =  server.receiveMessage();
+			reply =  server.waitMessage(new MessageFilter(){
+
+				@Override
+				public boolean filt(Message msg) {
+					return msg.type == MessageType.RESPOND_TO_CLIENT;
+				}
+				
+			}, 5000);
 		} catch (IOException e) {
 			connectToServer();
 		}	
