@@ -43,10 +43,12 @@ public class Server {
 	 * @param infoFile The file where ips and ports are defined.
 	 * @throws IOException If there is an error when reading the file.
 	 */
+
 	private static void init(String path) throws IOException, FileNotFoundException{
 		
 		//Read the cluster information from a file.
 		int id = 0;
+
 		String serverInfo;
 		BufferedReader reader = new BufferedReader(new FileReader(new File(path)));
 		while ((serverInfo = reader.readLine()) != null) {
@@ -458,6 +460,7 @@ public class Server {
 	 * @throws FileNotFoundException 
 	 */
 	public static void main(String[] args){
+
 		final String file = args[0];
 		new Thread(){
 			@Override
@@ -479,7 +482,17 @@ public class Server {
 		} catch (InterruptedException e2) {
 			e2.printStackTrace();
 		}
+
 	
+//		pid = 1;
+//		try {
+//			System.out.println("Test ends!");
+//			Server.init("/Users/mackbook/Distributed_System/Distributed-Systems-2015/Assignment2.4/Server/servers.txt");
+//		} catch (IOException e2) {
+//           System.out.println("ss");
+//		}
+//		System.out.println("Test ends!");
+
 		try {
 			ServerSocket seversocket = new ServerSocket(45678 + pid);
 			seversocket.accept();
@@ -489,7 +502,7 @@ public class Server {
 			e.printStackTrace();
 		}	
 
-		for(int j=0; j<3; j++){
+	/*	for(int j=0; j<3; j++){
 			new Thread(){
 				@Override
 				public void run(){
@@ -497,10 +510,6 @@ public class Server {
 						try {		
 							requestCriticalSection(true);
 						//	assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
-							/*System.out.println("The first one in request queue is:");
-					synchronized(requests){
-						System.out.println(requests.peek());
-					}*/
 							//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
 							//	Thread.sleep(1);
 						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters read cs.");
@@ -544,8 +553,7 @@ public class Server {
 					System.out.println("Test ends!");
 				}
 			}.start();
-		}
-		
+		}*/
 		
 	}
 }

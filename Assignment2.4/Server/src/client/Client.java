@@ -67,11 +67,16 @@ public class Client extends JFrame {
 	 * @throws Exception
 	 */
 	public Client() throws Exception {
+		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		this.setVisible(true);
+		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(null);
+		
 		JButton btnReservation = new JButton("Reservation");
 		btnReservation.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
 				Reserve re = new Reserve(server);
+				re.setVisible(true);
 			}
 		});
 		btnReservation.setBounds(66, 59, 117, 57);
@@ -107,19 +112,15 @@ public class Client extends JFrame {
 		JLabel lblFromServerSystem = new JLabel("From server system:");
 		lblFromServerSystem.setBounds(243, 78, 147, 16);
 		getContentPane().add(lblFromServerSystem);
-		//Initialize the socket
-		//Choose a random live server to connect.
-		while(true) {			
-			int chosenServer = new Random().nextInt(clusterInfo.size());
-			server = clusterInfo.get(chosenServer);
-			if(server.live) break;
-		}	
+		
 	}
 	/**
 	 * Randomly choose a server to connect
 	 */
 	public void connectToServer() {
 		try {
+			//Initialize the socket
+			//Choose a random live server to connect.
 		int chosenServer = new Random().nextInt(clusterInfo.size());
 		server = clusterInfo.get(chosenServer);
 		server.connect();
@@ -157,12 +158,15 @@ public class Client extends JFrame {
 	}
 	public static void main(String[] args) throws Exception{
 		Client client = new Client();
+		
 		String path = "servers.txt";
 		client.readServerInfo(path);
-		client.connectToServer();
-		while(true) {
-			client.refreshMessage();
-		}
+		System.out.println(client.clusterInfo);
+		
+//		client.connectToServer();
+//		while(true) {
+//			client.refreshMessage();
+//		}
 		
 	}
 
