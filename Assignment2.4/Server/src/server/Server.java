@@ -414,15 +414,15 @@ public class Server {
 				//enter cs
 				requestCriticalSection(false);
 				String[] contents = ((String) msg.content).split(" ");
-				for(String s : contents){
-					System.out.println(s);	
-				}
+//				for(String s : contents){
+//					System.out.println(s);	
+//				}
 				try {
 					//Reservation is successful
 					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "You have successfully reserved Seat" + (Serializable)seats, null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations, " + contents[0] + "! You have successfully reserved Seat" + (Serializable)seats, null));
 					process.message_event_unlock();
 					System.out.println("Reservation Success!!");	
 				} catch (NumberFormatException e) {
@@ -431,7 +431,7 @@ public class Server {
 					//There is not enough seats
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry, " +contents[0] +  ". The seats is not enough for your reservation! \n", null));
 					process.message_event_unlock();
 				} catch (RepeateReservationException e) {
 					//The reservation is repeated
@@ -451,12 +451,12 @@ public class Server {
 					Set <Integer> seats = service.search((String)msg.content);
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Hello! " +  "Mr/Ms " + (String)msg.content + "! Your reserved seats are " + seats.toString() + "\n", null));
 					process.message_event_unlock();
 				} catch (NoReservationInfoException e) {
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information for Mr/Ms " + (String)msg.content +" has been found", null));
 					process.message_event_unlock();
 				}
 				//Leave cs
@@ -586,8 +586,8 @@ public class Server {
 		} catch (InterruptedException e2) {
 			e2.printStackTrace();
 		}
-
-
+  
+		
 //Test
 //		for(int j=0; j<3; j++){
 //			new Thread(){

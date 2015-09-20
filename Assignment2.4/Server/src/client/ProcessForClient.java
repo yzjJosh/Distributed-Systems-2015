@@ -79,7 +79,7 @@ public class ProcessForClient {
 	 */
 	public Message receiveMessage() throws IOException{
 		if(receive == null)
-			throw new IOException("Process is not connected!");
+			throw new IOException("Process is not connected! Wait for re-connection!");
 		Message ret = null;
 		
 		try {

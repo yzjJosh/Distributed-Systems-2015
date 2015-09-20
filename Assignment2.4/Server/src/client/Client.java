@@ -6,6 +6,7 @@ import java.util.Random;
 
 import javax.swing.JFrame;
 import javax.swing.JButton;
+import javax.swing.JScrollPane;
 
 import java.awt.EventQueue;
 import java.awt.event.ActionListener;
@@ -24,9 +25,12 @@ import server.ClockUpdateThread;
 import server.Server;
 import server.Process;
 import server.ServerThread;
+
 import javax.swing.JTextArea;
+
 import java.awt.Color;
 import java.awt.Font;
+import javax.swing.ImageIcon;
 public class Client extends JFrame {
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
@@ -71,6 +75,8 @@ public class Client extends JFrame {
 	 * @throws Exception
 	 */
 	public Client() throws Exception {
+		getContentPane().setForeground(Color.GRAY);
+		setBackground(Color.LIGHT_GRAY);
 		getContentPane().setBackground(Color.LIGHT_GRAY);
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		this.setVisible(true);
@@ -96,7 +102,7 @@ public class Client extends JFrame {
 		
 		JButton btnSearch = new JButton("Search");
 		btnSearch.setFont(new Font("Lao MN", Font.BOLD | Font.ITALIC, 13));
-		btnSearch.setBackground(Color.BLACK);
+		btnSearch.setBackground(Color.WHITE);
 		btnSearch.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
 				Search se = new Search(server);
@@ -129,9 +135,18 @@ public class Client extends JFrame {
 		messageArea.setBackground(Color.GRAY);
 		
 		
-		messageArea.setBounds(231, 94, 295, 162);
+		messageArea.setBounds(26, 26, 295, 162);
 		getContentPane().add(messageArea);
 		messageArea.setLineWrap(true);
+		
+		JScrollPane scroll=new JScrollPane(messageArea);
+		scroll.setBounds(231,94,295,162);
+		getContentPane().add(scroll);
+		
+		JLabel lblNewLabel = new JLabel("New label");
+		lblNewLabel.setIcon(new ImageIcon("/Users/mackbook/Distributed_System/Distributed-Systems-2015/Assignment2.4/Server/Stars.jpg"));
+		lblNewLabel.setBounds(16, 31, 61, 16);
+		getContentPane().add(lblNewLabel);
 		
 	}
 	/**
@@ -177,24 +192,23 @@ public class Client extends JFrame {
 		final Client client = new Client();
 		String path = "servers.txt";
 		client.readServerInfo(path);
-		System.out.println(client.clusterInfo);
-		
-		client.connectToServer();
-		System.out.println("Main:  " + (client.server == null));
-		//client.server.sendMessage(new Message(MessageType.RESERVE_SEAT, "ss 12", null));
 		new Thread() {
-			@Override 
-			public void run(){
-				  while(true){
-			        	Message reply = null;
-			        	try {
-							reply =  client.server.receiveMessage();
-							client.messageArea.setText((String)reply.content + '\n');
+			@Override
+			public void run() {
+				while (true) {
+					client.connectToServer();
+					while (true) {
+						Message reply = null;
+						try {
+							reply = client.server.receiveMessage();
+							client.messageArea
+									.append((String) reply.content + '\n');
 						} catch (IOException e) {
-							e.printStackTrace();
+							break;
 						}
-			        	//System.out.println((String)reply.content);
-			        }
+					}
+
+				}
 			}
 		}.start();
       
