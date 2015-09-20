@@ -256,7 +256,6 @@ public class Server {
 			}
 		//---------------------------------------------------------------------------------------------------------------
 		//If enter this line, then congratulations! You have received acks from all lived servers
-		//assert(test.num == 9): "num is "+test.num;
 		synchronized(requests){
 			requests.add(msg);	//Add itself to the request queue
 			LinkedList<Message> list = requestsMap.get(pid);
