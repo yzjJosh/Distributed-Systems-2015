@@ -37,7 +37,7 @@ public class TheaterService implements Serializable {
 		Set<Integer> set = new HashSet <Integer> ();
 		//If the client has already reserved seats, then throws an exception
 		if(reservedSeats.containsKey(name)) { 
-			throw new RepeateReservationException();
+			throw new RepeateReservationException(reservedSeats.get(name));
 		}
 		//If there is no enough seats, then throws an exception
 		if(count > emptySeats.size()){
@@ -74,10 +74,12 @@ public class TheaterService implements Serializable {
 	 * @return The number of seates released.
 	 * @throws NoReservationInfoException If cannot find the information of the client.
 	 */
-	public int delete(String name) throws NoReservationInfoException{
+	public int[] delete(String name) throws NoReservationInfoException{
 		if(reservedSeats.containsKey(name)) {
-			int num = reservedSeats.get(name).size();
+			int[] num = new int[2];
+			num[0] = reservedSeats.get(name).size();
 			reservedSeats.remove(name);
+			num[1] = emptySeats.size();
 			return num;
 		}else {
 			throw new NoReservationInfoException();

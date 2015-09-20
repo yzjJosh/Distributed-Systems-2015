@@ -423,7 +423,7 @@ public class Server {
 					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations, " + contents[0] + "! You have successfully reserved Seat" + (Serializable)seats, null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations, " + contents[0] + "! You have successfully reserved Seat" + seats, null));
 					process.message_event_unlock();
 					System.out.println("Reservation Success!!");	
 				} catch (NumberFormatException e) {
@@ -439,7 +439,7 @@ public class Server {
 					//The reservation is repeated
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! You have reserved the seats! \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! You have reserved the seats! " + e.reservedSeats, null));
 					process.message_event_unlock();
 					System.out.println("Repeated reservation!");
 				}
@@ -461,7 +461,7 @@ public class Server {
 				} catch (NoReservationInfoException e) {
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information for Mr/Ms " + (String)msg.content +" has been found", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information for Mr/Ms " + (String)msg.content +" has been found ", null));
 					process.message_event_unlock();
 					System.out.println("Unable to find data!");
 				}
@@ -475,16 +475,16 @@ public class Server {
 				System.out.println("Got seate deletion request");
 				try {
 					//num = the number of the released seats
-					int num = service.delete((String)msg.content);
+					int[] num = service.delete((String)msg.content);
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num[0] + "seats are released! " + "Number of Left seats is " + num[1] + " \n", null));
 					process.message_event_unlock();
 					System.out.println("Deletion is successful!");
 				} catch (NoReservationInfoException e) {
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found \n", null));
 					process.message_event_unlock();
 					System.out.println("Unable to find data!");
 				}
