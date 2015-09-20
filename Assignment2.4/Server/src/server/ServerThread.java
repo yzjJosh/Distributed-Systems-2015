@@ -41,6 +41,7 @@ public class ServerThread extends Thread {
 	
 	@Override
 	public void run(){
+		System.out.println("Server thread "+Thread.currentThread().getId()+" starts!");
 		try {
 			while(true){			
 				Message msg = (Message)istream.readObject();	//Listen to messages
@@ -60,6 +61,10 @@ public class ServerThread extends Thread {
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {}
+		System.out.println("Server thread "+Thread.currentThread().getId()+" stops!");
+		if(process.pid >= 0){
+			Server.onProcessDied(process);
+		}
 	}
 	
 	/**

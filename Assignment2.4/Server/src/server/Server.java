@@ -23,7 +23,7 @@ public class Server {
 	private static TreeSet<Message> requests = new TreeSet<Message>();		  //The queue of waiting requests
 	private static TreeSet<Message> writeRequests = new TreeSet<Message>();	  		//The queue of waiting write requests
 	private static HashMap<Integer, LinkedList<Message>> requestsMap = new HashMap<Integer, LinkedList<Message>>(); //From pid to a request
-	private static TheaterService service = new TheaterService(20);	//The theater service object
+	private static TheaterService service;	//The theater service object
 
 	private static final int MAX_RESPONSE_TIME = 5000;	//The maximum response time of this system.
 	
@@ -46,7 +46,8 @@ public class Server {
 	 * @throws IOException If there is an error when reading the file.
 	 */
 
-	private static void init(String path) throws IOException, FileNotFoundException{
+	private static void init(String path, int maxNumOfSeates) throws IOException, FileNotFoundException{
+		service  = new TheaterService(maxNumOfSeates);
 		
 		//Read the cluster information from a file.
 		int id = 0;
@@ -65,7 +66,7 @@ public class Server {
 		
 		//Get my pid.
 		ServerSocket serversocket = null;
-		System.out.println(InetAddress.getLocalHost().getHostAddress());
+		System.out.println("My IP adress is: "+InetAddress.getLocalHost().getHostAddress());
 		for(Process process : clusterInfo.values())
 			if(process.ip.equals(InetAddress.getLocalHost().getHostAddress()))
 				
@@ -238,7 +239,6 @@ public class Server {
 						}, MAX_RESPONSE_TIME); //Wait for its ack reply for 5s.
 					}catch (IOException e){
 						onProcessDied(p);	//No response, make it is died.
-						System.err.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", is dead");
 					}
 					m.release();		
 				}
@@ -301,7 +301,7 @@ public class Server {
 				writeRequests.remove(msg);
 		}
 		//Then tell every server that I want to release the critical section
-		broadCastMessage(MessageType.CS_RELEASE, null);
+		broadCastMessage(MessageType.CS_RELEASE, write? service: null);
 		if(write) read_write_lock.release(MAX_READER_IN_A_SERVER);
 		else read_write_lock.release();
 	}
@@ -341,7 +341,7 @@ public class Server {
 	 * When a process dies, call this method to clear the process.
 	 * @param process The died process
 	 */
-	private static void onProcessDied(Process process){
+	public static void onProcessDied(Process process){
 		synchronized(process){
 			process.live = false;
 			synchronized(requests){
@@ -352,6 +352,7 @@ public class Server {
 						writeRequests.remove(msg);
 					}
 				}
+				System.err.println("pid="+process.pid+", addr="+process.ip+":"+process.port+", is dead");
 				requests.notifyAll();
 			}
 		}
@@ -403,8 +404,10 @@ public class Server {
 					Message del = list.pollFirst();
 					if(del == null) break;
 					requests.remove(del);
-					if(del.type == MessageType.CS_REQUEST_WRITE)
+					if(del.type == MessageType.CS_REQUEST_WRITE){
 						writeRequests.remove(del);
+						service = (TheaterService) msg.content;
+					}
 					requests.notifyAll();
 				}
 				break;
@@ -412,10 +415,8 @@ public class Server {
 			case RESERVE_SEAT:    //When receiving a reserve request, to execute the following service.
 				//enter cs
 				requestCriticalSection(false);
+				System.out.println("Got client request to reserve seates!");
 				String[] contents = ((String) msg.content).split(" ");
-				for(String s : contents){
-					System.out.println(s);	
-				}
 				try {
 					//Reservation is successful
 					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
@@ -432,12 +433,14 @@ public class Server {
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
 					process.message_event_unlock();
+					System.out.println("No enough seates found!");
 				} catch (RepeateReservationException e) {
 					//The reservation is repeated
 					process.message_event_lock();
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! You have reserved the seats! \n", null));
 					process.message_event_unlock();
+					System.out.println("Repeated reservation!");
 				}
 				//release cs
 				releaseCriticalSection();
@@ -446,17 +449,20 @@ public class Server {
 			case SEARCH_SEAT:
 				//Enter cs as a reader
 				requestCriticalSection(true);
+				System.out.println("Received search request from client");
 				try {
 					Set <Integer> seats = service.search((String)msg.content);
 					process.message_event_lock();
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
 					process.message_event_unlock();
+					System.out.println("Search is successful!");
 				} catch (NoReservationInfoException e) {
 					process.message_event_lock();
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
 					process.message_event_unlock();
+					System.out.println("Unable to find data!");
 				}
 				//Leave cs
 				releaseCriticalSection();
@@ -465,6 +471,7 @@ public class Server {
 			case DELETE_SEAT:
 				//Enter cs as  a writer
 				requestCriticalSection(false);
+				System.out.println("Got seate deletion request");
 				try {
 					//num = the number of the released seats
 					int num = service.delete((String)msg.content);
@@ -472,11 +479,13 @@ public class Server {
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
 					process.message_event_unlock();
+					System.out.println("Deletion is successful!");
 				} catch (NoReservationInfoException e) {
 					process.message_event_lock();
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
 					process.message_event_unlock();
+					System.out.println("Unable to find data!");
 				}
 				//Leave cs
 				releaseCriticalSection();
@@ -563,83 +572,7 @@ public class Server {
 	 * @throws IOException 
 	 * @throws FileNotFoundException 
 	 */
-	public static void main(String[] args){
-
-		final String file = "servers.txt";
-		new Thread(){
-			@Override
-			public void run(){
-				try {
-					init(file);
-				} catch (FileNotFoundException e) {
-					e.printStackTrace();
-				} catch (IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-			}
-		}.start();
-		
-		try {
-			Thread.sleep(8000);
-		} catch (InterruptedException e2) {
-			e2.printStackTrace();
-		}
-
-
-//Test
-//		for(int j=0; j<3; j++){
-//			new Thread(){
-//				@Override
-//				public void run(){
-//					for(int i=0; i<150; i++){
-//						try {		
-//							requestCriticalSection(true);
-//						//	assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
-//							//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
-//							//	Thread.sleep(1);
-//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters read cs.");
-//							File testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
-//							BufferedReader br = new BufferedReader(new FileReader(testFile));
-//							int read = Integer.parseInt(br.readLine());
-//							br.close();
-//							br = new BufferedReader(new FileReader(testFile));
-//							int read2 = Integer.parseInt(br.readLine());
-//							br.close();
-//							br = new BufferedReader(new FileReader(testFile));
-//							int read3 = Integer.parseInt(br.readLine());
-//							assert(read == read2 && read2==read3);
-//							br.close();
-//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases read cs.");
-//							releaseCriticalSection();
-//							
-//							requestCriticalSection(false);
-//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters write cs.");
-//							testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
-//							br = new BufferedReader(new FileReader(testFile));
-//							read = Integer.parseInt(br.readLine());
-//							br.close();
-//							BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
-//							writer.write(""+(read+1));
-//							writer.close();
-//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases write cs.");
-//							//	System.out.println("Process "+pid+" leave CS"+" at "+System.currentTimeMillis()%10000);
-//					//		assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid+". clock="+clock;
-//							releaseCriticalSection();	
-//					//		assert(requests.isEmpty() || requests.first().clk.pid!=pid);
-//						} catch (Exception e) {
-//							e.printStackTrace();
-//							System.out.println("The request queue is:");
-//							synchronized(requests){
-//								for(Message m : requests)
-//									System.out.println(m);
-//							}
-//						}
-//					}
-//					System.out.println("Test ends!");
-//				}
-//			}.start();
-//		}
-		
+	public static void main(String[] args) throws FileNotFoundException, IOException{
+		init(args[0], Integer.parseInt(args[1]));
 	}
 }
