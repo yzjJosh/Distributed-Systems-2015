@@ -478,7 +478,7 @@ public class Server {
 					int num = service.delete((String)msg.content);
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! You have deleted " + num + "seats are released! \n", null));
 					process.message_event_unlock();
 					System.out.println("Deletion is successful!");
 				} catch (NoReservationInfoException e) {
