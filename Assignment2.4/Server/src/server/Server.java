@@ -482,7 +482,7 @@ public class Server {
 				break;
 				
 			case SERVER_SYNC_DATA:
-				final Message m = msg;
+				final Message message = msg;
 				final Process proc = process;
 				Thread waitThread = new Thread(){
 					@Override
@@ -491,7 +491,7 @@ public class Server {
 							proc.waitMessage(new MessageFilter(){
 								@Override
 								public boolean filt(Message m) {
-									return m.type == MessageType.SERVER_SYNC_COMPLETE && m.clk.pid == m.clk.pid;
+									return m.type == MessageType.SERVER_SYNC_COMPLETE && m.clk.pid == message.clk.pid;
 								}
 							}, MAX_RESPONSE_TIME);
 						}catch(IOException e){}
