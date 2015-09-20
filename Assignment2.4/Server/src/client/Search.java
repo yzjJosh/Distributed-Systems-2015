@@ -5,6 +5,7 @@ import java.awt.FlowLayout;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 
@@ -56,7 +57,10 @@ public class Search extends JDialog {
 				JButton okButton = new JButton("OK");
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
-						String data = nameField.getText();
+						String data = nameField.getText() ;						
+						while(data == null) {
+							JOptionPane.showMessageDialog(null,"There is null field!!");
+						}
 						Message msg = new Message(MessageType.SEARCH_SEAT, data, null);
 						try {
 							server.sendMessage(msg);

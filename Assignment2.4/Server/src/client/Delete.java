@@ -5,6 +5,7 @@ import java.awt.FlowLayout;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 import javax.swing.JTextField;
@@ -57,7 +58,10 @@ public class Delete extends JDialog {
 				//Start to send the name to the server
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
-						String data = nameField.getText() ;
+						String data = nameField.getText() ;						
+						while(data == null) {
+							JOptionPane.showMessageDialog(null,"There is null field!!");
+						}
 						Message msg = new Message(MessageType.DELETE_SEAT, data, null);
 						try {
 							server.sendMessage(msg);
