@@ -26,7 +26,7 @@ public class ServerThread extends Thread {
 	public ServerThread(ObjectInputStream istream, ObjectOutputStream ostream){
 		this.istream = istream;
 		this.ostream = ostream;
-		this.process = null;
+		new Process(-1,null,-1).associate(this);
 	}
 	
 	/**
@@ -41,11 +41,10 @@ public class ServerThread extends Thread {
 	
 	@Override
 	public void run(){
-		System.out.println("Server thread "+Thread.currentThread().getId()+", starts."+(process==null?"":"(Associated with process "+process.pid+")"));
 		try {
 			while(true){			
 				Message msg = (Message)istream.readObject();	//Listen to messages
-				Server.onReceivingMessage(msg, ostream);	//Throw the new message to server for response
+				Server.onReceivingMessage(msg, process);	//Throw the new message to server for response
 				synchronized(waitingQueues){
 					for(LinkedBlockingQueue<Message> q: waitingQueues)
 						try {
@@ -58,14 +57,6 @@ public class ServerThread extends Thread {
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {}
-		System.err.println("Server thread "+Thread.currentThread().getId()+" terminates.");
-		if(process != null)
-			synchronized(process){
-				if(process.live){
-					process.live = false;
-					System.err.println("pid="+process.pid+", addr="+process.ip+":"+process.port+", is dead");
-				}
-			}
 	}
 	
 	/**

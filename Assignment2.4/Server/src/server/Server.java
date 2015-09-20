@@ -29,6 +29,7 @@ public class Server {
 	private static Object clock_lock = new Object();	//clock access mutex lock
 	private static final int MAX_READER_IN_A_SERVER = 20;	//Maximum number of concurent readers in each server.
 	private static Semaphore read_write_lock = new Semaphore(MAX_READER_IN_A_SERVER);	//The read-write lock
+	private static Semaphore cs_lock = new Semaphore(1);	//Lock to ensure that only one thread can call requestCS
 	
 	/**
 	 *A thread that is good for synchronization
@@ -105,8 +106,11 @@ public class Server {
 		
 		for(Entry<Process, mThread> entry : threads.entrySet()){
 			while(entry.getKey().live && entry.getValue().getState() != Thread.State.WAITING); //Wait until thread starts waiting
-			if(entry.getKey().live)
+			if(entry.getKey().live){
+				entry.getKey().message_event_lock();
 				entry.getKey().sendMessage(new Message(MessageType.SERVER_SYNC, null, updateClock()));
+				entry.getKey().message_event_unlock();
+			}
 		}
 
 		//Wait until all threads have stopped
@@ -118,7 +122,7 @@ public class Server {
 			}
 		
 		//Broadcast a confirmation to all servers so that they know this server is ready
-		broadCastMessage(new Message(MessageType.SERVER_SYNC_COMPLETE, null, null), true);
+		broadCastMessage(MessageType.SERVER_SYNC_COMPLETE, null);
 		System.out.println("Synchronization success!");			
 		System.out.println("Cluster infomation:");
 		for(Process p : clusterInfo.values())
@@ -153,17 +157,20 @@ public class Server {
 		try {
 			if(read) read_write_lock.acquire();
 			else read_write_lock.acquire(MAX_READER_IN_A_SERVER);
+			cs_lock.acquire();
 		} catch (InterruptedException e1) {
 			e1.printStackTrace();
 		}
 	
 		final MessageType type = read? MessageType.CS_REQUEST_READ : MessageType.CS_REQUEST_WRITE;		//The sending message type.
 		final MessageType ackType = read? MessageType.ACKNOWLEDGE_READ : MessageType.ACKNOWLEDGE_WRITE;	//The receiving message type.
-		final Message msg = new Message(type, null, updateClock());	//The request message
-
+		
+		for(Process process : clusterInfo.values())
+			process.message_event_lock();
 		
 		//Send the requests to all other servers
 		LinkedList<mThread> l = new LinkedList<mThread>();
+		final Message msg = new Message(type, null, updateClock());	//The request message
 		for(Process process : clusterInfo.values()){
 			if(!process.live || process.pid == pid) continue;
 			final Process p = process;
@@ -171,15 +178,12 @@ public class Server {
 				@Override
 				public void run(){
 					try {
-						Message reply = p.waitMessage(new MessageFilter(){
+						p.waitMessage(new MessageFilter(){
 							@Override
 							public boolean filt(Message m) {
 								return m.type == ackType && m.compareTo(msg) > 0 && m.clk.pid == p.pid;
 							}
 						}, MAX_RESPONSE_TIME); //Wait for its ack reply for 5s.
-						assert(reply.type == ackType) : reply;
-						assert(reply.compareTo(msg) > 0);
-						assert(reply.clk.pid == p.pid);
 					}catch (IOException e){
 						synchronized(p){
 							p.live = false;	//If no response, set it dead.
@@ -191,7 +195,6 @@ public class Server {
 			});
 			l.peekLast().start();
 			while(p.live && l.peekLast().getState() != Thread.State.WAITING);	//Wait until the thread starts waiting
-			updateClock();
 			try{
 				process.sendMessage(msg);
 			}catch(IOException e){
@@ -200,6 +203,8 @@ public class Server {
 				}
 			}
 		}
+		for(Process process : clusterInfo.values())
+			process.message_event_unlock();
 		
 		//Wait until all threads stopped.
 		for(mThread thread : l)
@@ -231,7 +236,7 @@ public class Server {
 			}
 		}
 		//After it's notified and satisfies the requirements, it can enter the cs.
-		//System.out.println("Allowed to enter the critical section ("+msg+")");
+		cs_lock.release();
 	}
 	
 	/**
@@ -251,7 +256,7 @@ public class Server {
 				writeRequests.remove(msg);
 		}
 		//Then tell every server that I want to release the critical section
-		broadCastMessage(new Message(MessageType.CS_RELEASE, null, null), true);
+		broadCastMessage(MessageType.CS_RELEASE, null);
 		if(write) read_write_lock.release(MAX_READER_IN_A_SERVER);
 		else read_write_lock.release();
 	}
@@ -294,10 +299,10 @@ public class Server {
 	 * other servers. These messages will be processed and responded here. (This method may be called by different threads
 	 * simontaneously, so be careful with concurrency when implementing it)
 	 * @param msg The message received.
-	 * @param link The outputstream where you can send a reply.
+	 * @param process The process where this message is from. If this message is from client, pid of process will be -1.
 	 * @throws IOException If there is an error when transferring data from socket.
 	 */
-	public static void onReceivingMessage(Message msg, ObjectOutputStream link) throws IOException{
+	public static void onReceivingMessage(Message msg, Process process) throws IOException{
 		updateClock(msg.clk); //Update the clock firstly.
 		switch(msg.type) {      //Add the message into the corresponding queue.
 			case CS_REQUEST_READ: 
@@ -308,25 +313,23 @@ public class Server {
 					if(list == null) requestsMap.put(msg.clk.pid, list = new LinkedList<Message>());
 					list.add(msg);
 				}
-				synchronized(link){
-					link.writeObject(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
-				}
+				process.message_event_lock();
+				process.sendMessage(new Message(MessageType.ACKNOWLEDGE_READ, null, updateClock()));
+				process.message_event_unlock();
 				break;
 				
 			case CS_REQUEST_WRITE:
 				//When receive the write request, add the request to the queue and write queue, then send back an acknowledgement.
 				synchronized(requests){
-		//			if(!requests.isEmpty() && requests.first().clk.pid == pid)
-		//				assert(requests.first().compareTo(msg) < 0): requests.first()+" is larger than "+msg; 
 					requests.add(msg);
 					writeRequests.add(msg);
 					LinkedList<Message> list = requestsMap.get(msg.clk.pid);
 					if(list == null) requestsMap.put(msg.clk.pid, list = new LinkedList<Message>());
 					list.add(msg);
 				}
-				synchronized(link){
-					link.writeObject(new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
-				}
+				process.message_event_lock();
+				process.sendMessage(new Message(MessageType.ACKNOWLEDGE_WRITE, null, updateClock()));
+				process.message_event_unlock();
 				break;
 				
 			case CS_RELEASE:
@@ -348,21 +351,24 @@ public class Server {
 				try {
 					//Reservation is successful
 					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
-					synchronized(link){
-						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT,  (Serializable) seats, null));
-					}
+					process.message_event_lock();
+					updateClock();
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT,  (Serializable) seats, null));
+					process.message_event_unlock();
 				} catch (NumberFormatException e) {
 					
 				} catch (NoEnoughSeatsException e) {
 					//There is not enough seats
-					synchronized(link){
-						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
-					}
+					process.message_event_lock();
+					updateClock();
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					process.message_event_unlock();
 				} catch (RepeateReservationException e) {
 					//The reservation is repeated
-					synchronized(link){
-						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
-					}
+					process.message_event_lock();
+					updateClock();
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					process.message_event_unlock();
 				}
 				//release cs
 				releaseCriticalSection();
@@ -373,13 +379,15 @@ public class Server {
 				requestCriticalSection(true);
 				try {
 					Set <Integer> seats = service.search((String)msg.content);
-					synchronized(link){
-						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
-					}
+					process.message_event_lock();
+					updateClock();
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations! Your reserved seats are " + seats.toString() + "\n", null));
+					process.message_event_unlock();
 				} catch (NoReservationInfoException e) {
-					synchronized(link){
-						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
-					}
+					process.message_event_lock();
+					updateClock();
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					process.message_event_unlock();
 				}
 				//Leave cs
 				releaseCriticalSection();
@@ -391,13 +399,15 @@ public class Server {
 				try {
 					//num = the number of the released seats
 					int num = service.delete((String)msg.content);
-					synchronized(link){
-						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
-					}
+					process.message_event_lock();
+					updateClock();
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! Your reserved " + num + "seats are released! \n", null));
+					process.message_event_unlock();
 				} catch (NoReservationInfoException e) {
-					synchronized(link){
-						link.writeObject(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
-					}
+					process.message_event_lock();
+					updateClock();
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found", null));
+					process.message_event_unlock();
 				}
 				//Leave cs
 				releaseCriticalSection();
@@ -405,9 +415,9 @@ public class Server {
 			
 			case SERVER_SYNC:
 				//Send back the seate information to the sync server.
-				synchronized(link){
-					link.writeObject(new Message(MessageType.SERVER_SYNC_RESPONSE, null, updateClock()));
-				}
+				process.message_event_lock();
+				process.sendMessage(new Message(MessageType.SERVER_SYNC_RESPONSE, null, updateClock()));
+				process.message_event_unlock();
 				break;
 
 			case SERVER_SYNC_COMPLETE:
@@ -423,32 +433,21 @@ public class Server {
 			default:
 				break;
 		}
-		synchronized(link){
-			link.flush();
-		}
 	}
 	
 	/**
 	 * Send the timestamped message to all other servers.
-	 * @param msg The message to broadcast
-	 * @param usingCurTimestamp If using current timestamp. If true, use real-time timestamp. If false, use the timestamp
-	 * of msg.
+	 * @param type The type of message
+	 * @param content Content of message
 	 */
-	public static void broadCastMessage(Message msg, boolean usingCurTimestamp){
+	public static void broadCastMessage(MessageType type, Serializable content){
 		for(Process process : clusterInfo.values()){
-			synchronized(process){
-				if(!process.live || process.pid == pid) continue;
-				try {
-					if(usingCurTimestamp)
-						process.sendMessage(new Message(msg.type, msg.content, updateClock()));
-					else{
-						updateClock();
-						process.sendMessage(msg);
-					}
-				} catch (UnknownHostException e) {
-				} catch (IOException e) {
-				}
-			}
+			if(!process.live || process.pid == pid) continue;
+			process.message_event_lock();
+			try {
+				process.sendMessage(new Message(type, content, updateClock()));
+			} catch (IOException e) {}
+			process.message_event_unlock();
 		}
 	}
 	
@@ -490,41 +489,63 @@ public class Server {
 			e.printStackTrace();
 		}	
 
-		for(int i=0; i<50; i++){
-			try {		
-					assert(requests.isEmpty() || requests.first().clk.pid!=pid);
-					requestCriticalSection(false);
-					assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
-					/*System.out.println("The first one in request queue is:");
+		for(int j=0; j<3; j++){
+			new Thread(){
+				@Override
+				public void run(){
+					for(int i=0; i<50; i++){
+						try {		
+							requestCriticalSection(true);
+						//	assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
+							/*System.out.println("The first one in request queue is:");
 					synchronized(requests){
 						System.out.println(requests.peek());
 					}*/
-				//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
-				//	Thread.sleep(1);
-					File testFile = new File("E:\\USA\\courses\\Distributed_System\\test\\test.txt");
-					BufferedReader br = new BufferedReader(new FileReader(testFile));
-					int read = Integer.parseInt(br.readLine());
-					br.close();
-				//	releaseCritialSection();
-				//	requestCritialSection(false);
-					BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
-					writer.write(""+(read+1));
-					writer.close();
-
-				//	System.out.println("Process "+pid+" leave CS"+" at "+System.currentTimeMillis()%10000);
-					assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid+". clock="+clock;
-					releaseCriticalSection();	
-					assert(requests.isEmpty() || requests.first().clk.pid!=pid);
-			} catch (Exception e) {
-				e.printStackTrace();
-				System.out.println("The request queue is:");
-				synchronized(requests){
-					for(Message m : requests)
-						System.out.println(m);
+							//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
+							//	Thread.sleep(1);
+						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters read cs.");
+							File testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
+							BufferedReader br = new BufferedReader(new FileReader(testFile));
+							int read = Integer.parseInt(br.readLine());
+							br.close();
+							br = new BufferedReader(new FileReader(testFile));
+							int read2 = Integer.parseInt(br.readLine());
+							br.close();
+							br = new BufferedReader(new FileReader(testFile));
+							int read3 = Integer.parseInt(br.readLine());
+							assert(read == read2 && read2==read3);
+							br.close();
+						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases read cs.");
+							releaseCriticalSection();
+							
+							requestCriticalSection(false);
+						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters write cs.");
+							testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
+							br = new BufferedReader(new FileReader(testFile));
+							read = Integer.parseInt(br.readLine());
+							br.close();
+							BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
+							writer.write(""+(read+1));
+							writer.close();
+						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases write cs.");
+							//	System.out.println("Process "+pid+" leave CS"+" at "+System.currentTimeMillis()%10000);
+					//		assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid+". clock="+clock;
+							releaseCriticalSection();	
+					//		assert(requests.isEmpty() || requests.first().clk.pid!=pid);
+						} catch (Exception e) {
+							e.printStackTrace();
+							System.out.println("The request queue is:");
+							synchronized(requests){
+								for(Message m : requests)
+									System.out.println(m);
+							}
+						}
+					}
+					System.out.println("Test ends!");
 				}
-			}
+			}.start();
 		}
-		System.out.println("Test ends!");
+		
 		
 	}
 }

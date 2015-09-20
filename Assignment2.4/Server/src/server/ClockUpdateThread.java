@@ -1,6 +1,7 @@
 package server;
 
 import message.*;
+
 /**
  * ClockUpdateThread is a thread witch peiodically sends a timestamped message to all other processes.
  *
@@ -21,7 +22,7 @@ public class ClockUpdateThread extends Thread {
 	public void run(){
 		try {
 			while(true){
-		//		Server.broadCastMessage(new Message(MessageType.CLOCK_MESSAGE, null, null), true);		
+				Server.broadCastMessage(MessageType.CLOCK_MESSAGE, null);		
 				Thread.sleep(period);
 			}
 		} catch (InterruptedException e) {

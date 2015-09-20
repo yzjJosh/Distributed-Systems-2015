@@ -1,9 +1,9 @@
 package server;
 
 import java.io.*;
-import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.util.concurrent.Semaphore;
 
 import message.*;
 
@@ -20,6 +20,7 @@ public class Process {
 	private ObjectInputStream receive;		//The stream to receive data from server
 	public boolean live;					//If the server process live or dead.
 	private ServerThread thread;			//The thread which listens to incoming messages from this process
+	private Semaphore message_lock = new Semaphore(1);	//A semaphore associate with this process used for message event
 	
 	/**
 	 * Create a new process object
@@ -67,12 +68,10 @@ public class Process {
 	 */
 	public void associate(ServerThread thread){
 		assert(thread != null);
-		assert(thread.process == null);
 		send = thread.ostream;
 		receive = thread.istream;
 		this.thread = thread;
 		thread.process = this;
-		System.out.println("Server thread "+thread.getId()+" is associated with process "+pid+".");
 	}
 	
 	/**
@@ -80,13 +79,11 @@ public class Process {
 	 * @param msg The message
 	 * @throws IOException If there is an error occurs
 	 */
-	public void sendMessage(Message msg) throws IOException{
+	public synchronized void sendMessage(Message msg) throws IOException{
 		if(send == null)
 			throw new IOException("Process is not connected!");
-			synchronized(send){
-				send.writeObject(msg);
-				send.flush();
-			}
+		send.writeObject(msg);
+		send.flush();
 	}
 	
 	/**
@@ -98,7 +95,7 @@ public class Process {
 	 * @throws SocketTimeoutException If no message received on time
 	 * @throws IOException When the process is not connected
 	 */
-	public synchronized Message waitMessage(final MessageFilter filter, final int time) throws IOException{
+	public Message waitMessage(final MessageFilter filter, final int time) throws IOException{
 		if(receive == null || thread == null)
 			throw new IOException("Process is not connected!");
 		Message ret = null;
@@ -120,6 +117,24 @@ public class Process {
 		}
 		monitor.interrupt();
 		return ret;
+	}
+	
+	/**
+	 * Acquire operation for inner semaphore
+	 */
+	public void message_event_lock(){
+		try {
+			message_lock.acquire();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	/**
+	 * Release operation for inner semaphore
+	 */
+	public void message_event_unlock(){
+		message_lock.release();
 	}
 	
 	@Override
