@@ -59,16 +59,17 @@ public class Delete extends JDialog {
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
 						String data = nameField.getText() ;						
-						while(data == null) {
+						if(data.equals("")) {
 							JOptionPane.showMessageDialog(null,"There is null field!!");
+						} else {							
+							Message msg = new Message(MessageType.DELETE_SEAT, data, null);
+							try {
+								server.sendMessage(msg);
+							} catch (IOException e1) {
+								e1.printStackTrace();
+							}
+							dispose();
 						}
-						Message msg = new Message(MessageType.DELETE_SEAT, data, null);
-						try {
-							server.sendMessage(msg);
-						} catch (IOException e1) {
-							e1.printStackTrace();
-						}
-						dispose();
 					}
 				});
 				okButton.setActionCommand("OK");
