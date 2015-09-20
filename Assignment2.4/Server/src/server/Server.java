@@ -432,7 +432,7 @@ public class Server {
 					//There is not enough seats
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry, " +contents[0] +  ". The seats is not enough for your reservation! Only "+service.remainSeates()+" seates are empty.", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry, " +contents[0] +  ". You have requested " + contents[1] + " seats, but only "+service.remainSeates()+" seates are empty.", null));
 					process.message_event_unlock();
 					System.out.println("No enough seates found!");
 				} catch (RepeateReservationException e) {
@@ -478,13 +478,13 @@ public class Server {
 					int[] num = service.delete((String)msg.content);
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success! You have deleted " + num + "seats are released! \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Success, " +(String)msg.content + ". You have released " + num[0] + " seats! "+num[1]+" seats remain.", null));
 					process.message_event_unlock();
 					System.out.println("Deletion is successful!");
 				} catch (NoReservationInfoException e) {
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! No reservation information has been found \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry, " +(String)msg.content + ". No reservation information has been found.", null));
 					process.message_event_unlock();
 					System.out.println("Unable to find data!");
 				}

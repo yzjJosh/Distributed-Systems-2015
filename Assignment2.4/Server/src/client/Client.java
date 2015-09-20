@@ -47,7 +47,7 @@ public class Client extends JFrame {
 				String[] splits = serverInfo.split(" ");
 				String ip = splits[0];
 				int port = Integer.parseInt(splits[1]);
-				ProcessForClient process = new ProcessForClient(i, ip, port, false);
+				ProcessForClient process = new ProcessForClient(i, ip, port, true);
 				clusterInfo.put(i, process);
 				i++;
 			}

@@ -13,12 +13,10 @@ public class TheaterService implements Serializable {
 
 	private static final long serialVersionUID = 1L;
 	
-	private String[] seats; //The seates information, each element is a name.
 	private HashMap<String, Set<Integer>> reservedSeats; //Name to reserved seates.
 	Stack <Integer> emptySeats = new Stack <Integer>();
 	
 	public TheaterService(int numOfSeats) {
-		seats = new String[numOfSeats];
 		for(int i = 1; i <= numOfSeats; i++){
 			emptySeats.push(i);
 		}
@@ -78,8 +76,11 @@ public class TheaterService implements Serializable {
 		if(reservedSeats.containsKey(name)) {
 			int[] num = new int[2];
 			num[0] = reservedSeats.get(name).size();
-			reservedSeats.remove(name);
+			for(Integer No : reservedSeats.get(name))
+				emptySeats.add(No);
 			num[1] = emptySeats.size();
+			reservedSeats.remove(name);
+			assert(!reservedSeats.containsKey(name));
 			return num;
 		}else {
 			throw new NoReservationInfoException();
