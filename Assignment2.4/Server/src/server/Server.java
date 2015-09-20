@@ -19,10 +19,12 @@ public class Server {
 	private static Clock clock; //The Lamport's logical clock.
 	private static int pid;		//The pid of current process.
 	private static final HashMap<Integer, Process> clusterInfo = new HashMap<Integer, Process>(); //Pid to every srever's process in the cluster.
-	private static final TreeSet<Message> requests = new TreeSet<Message>();		  //The queue of waiting requests
-	private static final TreeSet<Message> writeRequests = new TreeSet<Message>();	  		//The queue of waiting write requests
-	private static final HashMap<Integer, LinkedList<Message>> requestsMap = new HashMap<Integer, LinkedList<Message>>(); //From pid to a request
+
+	private static TreeSet<Message> requests = new TreeSet<Message>();		  //The queue of waiting requests
+	private static TreeSet<Message> writeRequests = new TreeSet<Message>();	  		//The queue of waiting write requests
+	private static HashMap<Integer, LinkedList<Message>> requestsMap = new HashMap<Integer, LinkedList<Message>>(); //From pid to a request
 	private static TheaterService service = new TheaterService(20);	//The theater service object
+
 	private static final int MAX_RESPONSE_TIME = 5000;	//The maximum response time of this system.
 	
 	//Synchronization locks
@@ -95,13 +97,8 @@ public class Server {
 							}	
 						}, MAX_RESPONSE_TIME);	//Wait for p's response
 						assert(msg.type == MessageType.SERVER_SYNC_RESPONSE);
-
-						//TO-DO synchronize seate information here using the msg.content
-
 					} catch (IOException e) {
-						synchronized(p){
-							p.live = false;
-						}
+						onProcessDied(p);
 					}
 					m.release();
 				}
@@ -109,22 +106,72 @@ public class Server {
 			threads.get(p).start();
 		}
 		
+		//Start synchronization, send SERVER_SYNC_START message
 		for(Entry<Process, mThread> entry : threads.entrySet()){
 			while(entry.getKey().live && entry.getValue().getState() != Thread.State.WAITING); //Wait until thread starts waiting
 			if(entry.getKey().live){
 				entry.getKey().message_event_lock();
-				entry.getKey().sendMessage(new Message(MessageType.SERVER_SYNC, null, updateClock()));
+				try{
+					entry.getKey().sendMessage(new Message(MessageType.SERVER_SYNC_START, null, updateClock()));
+				}catch(IOException e){}
 				entry.getKey().message_event_unlock();
 			}
 		}
 
-		//Wait until all threads have stopped
+		//Wait until all processes have responded
 		for(mThread thread : threads.values())
 			try {
 				thread.m.acquire();
 			} catch (InterruptedException e1) {
 				e1.printStackTrace();
 			}
+		
+		//Choose one process to synchronize data
+		for(Process process : clusterInfo.values()){
+			if(!process.live || process.pid == pid) continue;
+			final Process p = process;
+			mThread waitThread = new mThread(){
+				@SuppressWarnings("unchecked")
+				@Override
+				public void run(){
+					Message msg;
+					try {
+						msg = p.waitMessage(new MessageFilter(){
+							@Override
+							public boolean filt(Message m) {
+								return m.type == MessageType.SERVER_SYNC_RESPONSE && m.clk.pid == p.pid;
+							}	
+						}, MAX_RESPONSE_TIME);
+						assert(msg.type == MessageType.SERVER_SYNC_RESPONSE);
+						assert(msg.content != null);
+						HashMap<String, Serializable> data = (HashMap<String, Serializable>) msg.content;
+						service = (TheaterService) data.get("service");
+						requests = (TreeSet<Message>) data.get("requests");
+						writeRequests = (TreeSet<Message>) data.get("writeRequests");
+						requestsMap	= (HashMap<Integer, LinkedList<Message>>) data.get("requestsMap");
+						assert(service != null);
+						assert(requests != null);
+						assert(writeRequests != null);
+						assert(requestsMap != null);
+					} catch (IOException e) {
+						onProcessDied(p);
+					}	
+					m.release();
+				}
+			};
+			waitThread.start();
+			while(p.live && waitThread.getState() == Thread.State.WAITING); // Wait until waitThread starts waiting
+			p.message_event_lock();
+			try{
+				p.sendMessage(new Message(MessageType.SERVER_SYNC_DATA, null, updateClock()));	//Request sync data.
+			}catch(IOException e){}
+			p.message_event_unlock();
+			try {
+				waitThread.m.acquire();	// Wait until thread ends
+			} catch (InterruptedException e) {} 
+			if(p.live)
+				break;
+		}
 		
 		//Broadcast a confirmation to all servers so that they know this server is ready
 		broadCastMessage(MessageType.SERVER_SYNC_COMPLETE, null);
@@ -190,9 +237,7 @@ public class Server {
 							}
 						}, MAX_RESPONSE_TIME); //Wait for its ack reply for 5s.
 					}catch (IOException e){
-						synchronized(p){
-							p.live = false;	//If no response, set it dead.
-						}
+						onProcessDied(p);	//No response, make it is died.
 						System.err.println("pid="+p.pid+", addr="+p.ip+":"+p.port+", is dead");
 					}
 					m.release();		
@@ -202,11 +247,7 @@ public class Server {
 			while(p.live && l.peekLast().getState() != Thread.State.WAITING);	//Wait until the thread starts waiting
 			try{
 				process.sendMessage(msg);
-			}catch(IOException e){
-				synchronized(process){
-					process.live = false;
-				}
-			}
+			}catch(IOException e){}
 		}
 		for(Process process : clusterInfo.values())
 			process.message_event_unlock();
@@ -297,6 +338,25 @@ public class Server {
 		return ret;
 	}
 	
+	/**
+	 * When a process dies, call this method to clear the process.
+	 * @param process The died process
+	 */
+	private static void onProcessDied(Process process){
+		synchronized(process){
+			process.live = false;
+			synchronized(requests){
+				LinkedList<Message> msgs = requestsMap.remove(process.pid);
+				if(msgs != null){
+					for(Message msg : msgs){
+						requests.remove(msg);
+						writeRequests.remove(msg);
+					}
+				}
+				requests.notifyAll();
+			}
+		}
+	}
 	
 	
 	/**
@@ -340,8 +400,9 @@ public class Server {
 			case CS_RELEASE:
 				synchronized(requests){
 					LinkedList<Message> list = requestsMap.get(msg.clk.pid);
-					assert(list != null);
+					if(list == null) break;
 					Message del = list.pollFirst();
+					if(del == null) break;
 					requests.remove(del);
 					if(del.type == MessageType.CS_REQUEST_WRITE)
 						writeRequests.remove(del);
@@ -422,11 +483,48 @@ public class Server {
 				releaseCriticalSection();
 				break;	
 			
-			case SERVER_SYNC:
+			case SERVER_SYNC_START:
 				//Send back the seate information to the sync server.
 				process.message_event_lock();
 				process.sendMessage(new Message(MessageType.SERVER_SYNC_RESPONSE, null, updateClock()));
 				process.message_event_unlock();
+				break;
+				
+			case SERVER_SYNC_DATA:
+				final Message message = msg;
+				final Process proc = process;
+				Thread waitThread = new Thread(){
+					@Override
+					public void run(){
+						try{
+							proc.waitMessage(new MessageFilter(){
+								@Override
+								public boolean filt(Message m) {
+									return m.type == MessageType.SERVER_SYNC_COMPLETE && m.clk.pid == message.clk.pid;
+								}
+							}, MAX_RESPONSE_TIME);
+						}catch(IOException e){}
+						try {
+							releaseCriticalSection();
+						} catch (IOException e) {
+							e.printStackTrace();
+						}
+					}
+				};
+				requestCriticalSection(false);
+				waitThread.start();
+				while(waitThread.getState() != Thread.State.WAITING && waitThread.getState()!=Thread.State.TERMINATED);
+				if(waitThread.getState() != Thread.State.WAITING) break;
+				HashMap<String, Serializable> data = new HashMap<String, Serializable>();
+				data.put("service", service);
+				synchronized(requests){	
+					data.put("requests",requests);
+					data.put("writeRequests", writeRequests);
+					data.put("requestsMap", requestsMap);
+					process.message_event_lock();
+					process.sendMessage(new Message(MessageType.SERVER_SYNC_RESPONSE, data, updateClock()));
+					process.message_event_unlock();
+				}
 				break;
 
 			case SERVER_SYNC_COMPLETE:
@@ -484,82 +582,65 @@ public class Server {
 		}.start();
 		
 		try {
-			Thread.sleep(5000);
+			Thread.sleep(8000);
 		} catch (InterruptedException e2) {
 			e2.printStackTrace();
 		}
 
-	
-//		pid = 1;
-//		try {
-//			System.out.println("Test ends!");
-//			Server.init("/Users/mackbook/Distributed_System/Distributed-Systems-2015/Assignment2.4/Server/servers.txt");
-//		} catch (IOException e2) {
-//           System.out.println("ss");
+
+//Test
+//		for(int j=0; j<3; j++){
+//			new Thread(){
+//				@Override
+//				public void run(){
+//					for(int i=0; i<150; i++){
+//						try {		
+//							requestCriticalSection(true);
+//						//	assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
+//							//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
+//							//	Thread.sleep(1);
+//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters read cs.");
+//							File testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
+//							BufferedReader br = new BufferedReader(new FileReader(testFile));
+//							int read = Integer.parseInt(br.readLine());
+//							br.close();
+//							br = new BufferedReader(new FileReader(testFile));
+//							int read2 = Integer.parseInt(br.readLine());
+//							br.close();
+//							br = new BufferedReader(new FileReader(testFile));
+//							int read3 = Integer.parseInt(br.readLine());
+//							assert(read == read2 && read2==read3);
+//							br.close();
+//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases read cs.");
+//							releaseCriticalSection();
+//							
+//							requestCriticalSection(false);
+//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters write cs.");
+//							testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
+//							br = new BufferedReader(new FileReader(testFile));
+//							read = Integer.parseInt(br.readLine());
+//							br.close();
+//							BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
+//							writer.write(""+(read+1));
+//							writer.close();
+//						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases write cs.");
+//							//	System.out.println("Process "+pid+" leave CS"+" at "+System.currentTimeMillis()%10000);
+//					//		assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid+". clock="+clock;
+//							releaseCriticalSection();	
+//					//		assert(requests.isEmpty() || requests.first().clk.pid!=pid);
+//						} catch (Exception e) {
+//							e.printStackTrace();
+//							System.out.println("The request queue is:");
+//							synchronized(requests){
+//								for(Message m : requests)
+//									System.out.println(m);
+//							}
+//						}
+//					}
+//					System.out.println("Test ends!");
+//				}
+//			}.start();
 //		}
-//		System.out.println("Test ends!");
-
-//		try {
-//			ServerSocket seversocket = new ServerSocket(45678 + pid);
-//			seversocket.accept();
-//			System.out.println("let's start!");
-//			seversocket.close();
-//		} catch (IOException e) {
-//			e.printStackTrace();
-//		}	
-
-	/*	for(int j=0; j<3; j++){
-			new Thread(){
-				@Override
-				public void run(){
-					for(int i=0; i<50; i++){
-						try {		
-							requestCriticalSection(true);
-						//	assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid;
-							//	System.out.println("Process "+pid+" enters CS"+" at "+System.currentTimeMillis()%10000+"<<<<<<<<<");
-							//	Thread.sleep(1);
-						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters read cs.");
-							File testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
-							BufferedReader br = new BufferedReader(new FileReader(testFile));
-							int read = Integer.parseInt(br.readLine());
-							br.close();
-							br = new BufferedReader(new FileReader(testFile));
-							int read2 = Integer.parseInt(br.readLine());
-							br.close();
-							br = new BufferedReader(new FileReader(testFile));
-							int read3 = Integer.parseInt(br.readLine());
-							assert(read == read2 && read2==read3);
-							br.close();
-						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases read cs.");
-							releaseCriticalSection();
-							
-							requestCriticalSection(false);
-						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"enters write cs.");
-							testFile = new File("E:\\USA\\courses\\Distributed_System\\Distributed-Systems-2015\\Assignment2.4\\test\\test.txt");
-							br = new BufferedReader(new FileReader(testFile));
-							read = Integer.parseInt(br.readLine());
-							br.close();
-							BufferedWriter writer = new BufferedWriter(new FileWriter(testFile));
-							writer.write(""+(read+1));
-							writer.close();
-						//	System.out.println(pid+"-"+Thread.currentThread().getId()+"releases write cs.");
-							//	System.out.println("Process "+pid+" leave CS"+" at "+System.currentTimeMillis()%10000);
-					//		assert(requests.first().clk.pid == pid): "Pid="+requests.first().clk.pid+", which should be "+pid+". clock="+clock;
-							releaseCriticalSection();	
-					//		assert(requests.isEmpty() || requests.first().clk.pid!=pid);
-						} catch (Exception e) {
-							e.printStackTrace();
-							System.out.println("The request queue is:");
-							synchronized(requests){
-								for(Message m : requests)
-									System.out.println(m);
-							}
-						}
-					}
-					System.out.println("Test ends!");
-				}
-			}.start();
-		}*/
 		
 	}
 }

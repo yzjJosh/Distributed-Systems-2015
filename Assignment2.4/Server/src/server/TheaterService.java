@@ -1,5 +1,6 @@
 package server;
 
+import java.io.Serializable;
 import java.util.*;
 
 import exceptions.*;
@@ -8,7 +9,9 @@ import exceptions.*;
  * TheaterService deals with core functions of seate reservation service.
  *
  */
-public class TheaterService {
+public class TheaterService implements Serializable {
+
+	private static final long serialVersionUID = 1L;
 	
 	private String[] seats; //The seates information, each element is a name.
 	private HashMap<String, Set<Integer>> reservedSeats; //Name to reserved seates.
