@@ -1,2 +1,18 @@
 /client
 /server
+<<<<<<< HEAD
+=======
+/.DS_Store
+/client/
+/exceptions/
+/message/
+/server/
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+/servers.txt
+=======
+/client/
+/message/
+>>>>>>> Stashed changes
+=======
+>>>>>>> origin/master

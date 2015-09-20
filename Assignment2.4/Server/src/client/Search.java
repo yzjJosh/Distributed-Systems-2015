@@ -30,7 +30,7 @@ public class Search extends JDialog {
 	/**
 	 * Create the dialog.
 	 */
-	public Search(final Process server) {
+	public Search(final ProcessForClient server) {
 	
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
@@ -57,12 +57,13 @@ public class Search extends JDialog {
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
 						String data = nameField.getText();
-						Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
+						Message msg = new Message(MessageType.SEARCH_SEAT, data, null);
 						try {
 							server.sendMessage(msg);
 						} catch (IOException e1) {
 							e1.printStackTrace();
 						}
+						dispose();
 					}
 				});
 				okButton.setActionCommand("OK");
@@ -71,6 +72,11 @@ public class Search extends JDialog {
 			}
 			{
 				JButton cancelButton = new JButton("Cancel");
+				cancelButton.addActionListener(new ActionListener() {
+					public void actionPerformed(ActionEvent e) {
+						dispose();
+					}
+				});
 				cancelButton.setActionCommand("Cancel");
 				buttonPane.add(cancelButton);
 			}

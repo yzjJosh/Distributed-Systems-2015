@@ -7,6 +7,7 @@ import java.util.Random;
 import javax.swing.JFrame;
 import javax.swing.JButton;
 
+import java.awt.EventQueue;
 import java.awt.event.ActionListener;
 import java.awt.event.ActionEvent;
 
@@ -23,13 +24,16 @@ import server.ClockUpdateThread;
 import server.Server;
 import server.Process;
 import server.ServerThread;
+import javax.swing.JTextArea;
+import java.awt.Color;
+import java.awt.Font;
 public class Client extends JFrame {
 	ObjectOutputStream writer = null;
 	ObjectInputStream reader = null;  //A buffer to store the message from the server
-	private static final HashMap<Integer, Process> clusterInfo = new HashMap<Integer, Process>(); //Pid to every srever's state in the cluster.
-	private JTextField messageField;
+	private static final HashMap<Integer, ProcessForClient> clusterInfo = new HashMap<Integer, ProcessForClient>(); //Pid to every srever's state in the cluster.
 	private File file = null;
-	private Process server = null;
+	private ProcessForClient server = null;
+	JTextArea messageArea = new JTextArea();
 	/**
 	 * Read the server information from the specified file
 	 * @param path the file path
@@ -46,7 +50,7 @@ public class Client extends JFrame {
 				String[] splits = serverInfo.split(" ");
 				String ip = splits[0];
 				int port = Integer.parseInt(splits[1]);
-				Process process = new Process(i, ip, port, false);
+				ProcessForClient process = new ProcessForClient(i, ip, port, false);
 				clusterInfo.put(i, process);
 				i++;
 			}
@@ -67,51 +71,67 @@ public class Client extends JFrame {
 	 * @throws Exception
 	 */
 	public Client() throws Exception {
+		getContentPane().setBackground(Color.LIGHT_GRAY);
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		this.setVisible(true);
-		setBounds(100, 100, 450, 300);
+		setBounds(100, 100, 568, 318);
 		getContentPane().setLayout(null);
 		
 		JButton btnReservation = new JButton("Reservation");
+		btnReservation.setFont(new Font("Lao MN", Font.BOLD | Font.ITALIC, 13));
+		btnReservation.setForeground(Color.BLACK);
+		btnReservation.setBackground(Color.WHITE);
 		btnReservation.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				Reserve re = new Reserve(server);
-				re.setVisible(true);
+				
+		        	Reserve re = new Reserve(server);
+				    re.setVisible(true);				        	
+				
+			
 			}
 		});
-		btnReservation.setBounds(66, 59, 117, 57);
+		
+		btnReservation.setBounds(66, 59, 117, 73);
 		getContentPane().add(btnReservation);
 		
 		JButton btnSearch = new JButton("Search");
+		btnSearch.setFont(new Font("Lao MN", Font.BOLD | Font.ITALIC, 13));
+		btnSearch.setBackground(Color.BLACK);
 		btnSearch.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
 				Search se = new Search(server);
+				se.setVisible(true);
 			}
 		});
-		btnSearch.setBounds(66, 128, 117, 65);
+		btnSearch.setBounds(66, 128, 117, 73);
 		getContentPane().add(btnSearch);
 		
 		JButton btnDelete = new JButton("Delete");
+		btnDelete.setFont(new Font("Lao MN", Font.BOLD | Font.ITALIC, 13));
 		btnDelete.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
 				Delete de = new Delete(server);
+				de.setVisible(true);
 			}
 		});
-		btnDelete.setBounds(66, 205, 117, 57);
+		btnDelete.setBounds(66, 199, 117, 73);
 		getContentPane().add(btnDelete);
 		
 		JLabel lblWelcomeToUse = new JLabel("Welcome to use the client reservation system!");
-		lblWelcomeToUse.setBounds(78, 31, 312, 16);
+		lblWelcomeToUse.setFont(new Font("Avenir Next", Font.BOLD, 15));
+		lblWelcomeToUse.setBounds(78, 22, 414, 25);
 		getContentPane().add(lblWelcomeToUse);
 		
-		messageField = new JTextField();
-		messageField.setBounds(243, 113, 134, 149);
-		getContentPane().add(messageField);
-		messageField.setColumns(10);
-		
 		JLabel lblFromServerSystem = new JLabel("From server system:");
-		lblFromServerSystem.setBounds(243, 78, 147, 16);
+		lblFromServerSystem.setFont(new Font("Helvetica", Font.BOLD, 13));
+		lblFromServerSystem.setBounds(231, 66, 147, 16);
 		getContentPane().add(lblFromServerSystem);
+		messageArea.setBackground(Color.GRAY);
+		
+		
+		messageArea.setBounds(231, 94, 295, 162);
+		getContentPane().add(messageArea);
+		messageArea.setLineWrap(true);
 		
 	}
 	/**
@@ -123,10 +143,14 @@ public class Client extends JFrame {
 			//Choose a random live server to connect.
 		int chosenServer = new Random().nextInt(clusterInfo.size());
 		server = clusterInfo.get(chosenServer);
+		System.out.println("BeforeConnect:  " + (server == null) + server);
+		
 		server.connect();
+		System.out.println("Connect success!!!!!!");
 		server.live = true;
 		} catch(IOException e) {
 			//The connection failed, make the live tag false and reconnect
+			System.out.println("Connect Failed!  ");
 			server.live = false;
 			connectToServer();
 		}
@@ -139,35 +163,43 @@ public class Client extends JFrame {
 	public void refreshMessage() {
 		Message reply = null;
 		try {
-			reply =  server.waitMessage(new MessageFilter(){
-
-				@Override
-				public boolean filt(Message msg) {
-					return msg.type == MessageType.RESPOND_TO_CLIENT;
-				}
-				
-			}, 5000);
+			reply =  server.receiveMessage();
 		} catch (IOException e) {
 			connectToServer();
 		}	
 		//Message from the server is not null, show the message.
 		if(reply != null) {
 			String content = (String) reply.content;
-			messageField.setText(content);			
+			messageArea.setText(content);;			
 		}
 	}
 	public static void main(String[] args) throws Exception{
-		Client client = new Client();
-		
+		final Client client = new Client();
 		String path = "servers.txt";
 		client.readServerInfo(path);
 		System.out.println(client.clusterInfo);
 		
-//		client.connectToServer();
-//		while(true) {
+		client.connectToServer();
+		System.out.println("Main:  " + (client.server == null));
+		//client.server.sendMessage(new Message(MessageType.RESERVE_SEAT, "ss 12", null));
+		new Thread() {
+			@Override 
+			public void run(){
+				  while(true){
+			        	Message reply = null;
+			        	try {
+							reply =  client.server.receiveMessage();
+							client.messageArea.setText((String)reply.content + '\n');
+						} catch (IOException e) {
+							e.printStackTrace();
+						}
+			        	//System.out.println((String)reply.content);
+			        }
+			}
+		}.start();
+      
 //			client.refreshMessage();
-//		}
+
 		
 	}
-
 }

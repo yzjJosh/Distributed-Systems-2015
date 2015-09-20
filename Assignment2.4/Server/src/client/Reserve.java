@@ -29,7 +29,7 @@ public class Reserve extends JDialog {
 	/**
 	 * Create the dialog.
 	 */
-	public Reserve(final Process server) {
+	public Reserve(final ProcessForClient server) {
 	
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
@@ -52,7 +52,7 @@ public class Reserve extends JDialog {
 		contentPanel.add(lblYourName);
 		
 		JLabel lblReservationCount = new JLabel("Reservation Count:");
-		lblReservationCount.setBounds(54, 143, 134, 16);
+		lblReservationCount.setBounds(254, 143, 134, 16);
 		contentPanel.add(lblReservationCount);
 		{
 			JPanel buttonPane = new JPanel();
@@ -63,13 +63,14 @@ public class Reserve extends JDialog {
 				//Start to send the name and count to the server
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
-						String data = nameField.getText() + countField.getText();
+						String data = nameField.getText() + " " + countField.getText();
 						Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
 						try {
 							server.sendMessage(msg);
 						} catch (IOException e1) {
 							e1.printStackTrace();
 						}
+					    dispose();
 					}
 				});
 				okButton.setActionCommand("OK");
@@ -78,6 +79,11 @@ public class Reserve extends JDialog {
 			}
 			{
 				JButton cancelButton = new JButton("Cancel");
+				cancelButton.addActionListener(new ActionListener() {
+					public void actionPerformed(ActionEvent e) {
+						dispose();
+					}
+				});
 				cancelButton.setActionCommand("Cancel");
 				buttonPane.add(cancelButton);
 			}
