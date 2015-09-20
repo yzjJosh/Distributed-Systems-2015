@@ -31,7 +31,7 @@ public class Delete extends JDialog {
 	 * Create the dialog.
 	 * @param server 
 	 */
-	public Delete(final Process server) {
+	public Delete(final ProcessForClient server) {
 		setBounds(100, 100, 450, 300);
 		getContentPane().setLayout(new BorderLayout());
 		contentPanel.setBorder(new EmptyBorder(5, 5, 5, 5));
@@ -58,12 +58,13 @@ public class Delete extends JDialog {
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
 						String data = nameField.getText() ;
-						Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
+						Message msg = new Message(MessageType.DELETE_SEAT, data, null);
 						try {
 							server.sendMessage(msg);
 						} catch (IOException e1) {
 							e1.printStackTrace();
 						}
+						dispose();
 					}
 				});
 				okButton.setActionCommand("OK");
@@ -72,6 +73,11 @@ public class Delete extends JDialog {
 			}
 			{
 				JButton cancelButton = new JButton("Cancel");
+				cancelButton.addActionListener(new ActionListener() {
+					public void actionPerformed(ActionEvent e) {
+						dispose();
+					}
+				});
 				cancelButton.setActionCommand("Cancel");
 				buttonPane.add(cancelButton);
 			}

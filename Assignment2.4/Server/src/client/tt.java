@@ -16,13 +16,11 @@ public class tt extends JDialog {
 	 * Launch the application.
 	 */
 	public static void main(String[] args) {
-		try {
-			tt dialog = new tt();
-			dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-			dialog.setVisible(true);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
+	 String[] s = {"rr", "tt" };
+	 for(String x : s){
+		 
+		 System.out.println(x);
+	 }
 	}
 
 	/**

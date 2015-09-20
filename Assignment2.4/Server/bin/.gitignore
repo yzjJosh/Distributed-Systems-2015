@@ -9,5 +9,10 @@
 /exceptions/
 /message/
 /server/
+<<<<<<< Updated upstream
 >>>>>>> Stashed changes
 /servers.txt
+=======
+/client/
+/message/
+>>>>>>> Stashed changes

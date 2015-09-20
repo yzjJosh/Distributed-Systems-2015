@@ -19,6 +19,7 @@ public class TheaterService {
 		for(int i = 1; i <= numOfSeats; i++){
 			emptySeats.push(i);
 		}
+		reservedSeats  = new HashMap<String, Set<Integer>>();
 	}
 	/**
 	 * Reserve certain number of seats for client.
@@ -32,11 +33,12 @@ public class TheaterService {
 		
 		Set<Integer> set = new HashSet <Integer> ();
 		//If the client has already reserved seats, then throws an exception
-		if(reservedSeats.containsKey(name)) {
+		if(reservedSeats.containsKey(name)) { 
 			throw new RepeateReservationException();
 		}
 		//If there is no enough seats, then throws an exception
 		if(count > emptySeats.size()){
+			System.out.println(count + "empty seats left: " + emptySeats.size());
 			throw new NoEnoughSeatsException();
 		}
 		while(count != 0){
@@ -55,6 +57,7 @@ public class TheaterService {
 	 * @throws NoReservationInfoException When cannot find information.
 	 */
 	public Set<Integer> search(String name) throws NoReservationInfoException{
+		System.out.println(name);
 		if(reservedSeats.containsKey(name)) {
 			return reservedSeats.get(name);
 		}else {

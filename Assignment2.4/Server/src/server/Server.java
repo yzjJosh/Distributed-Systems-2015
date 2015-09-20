@@ -22,7 +22,7 @@ public class Server {
 	private static final TreeSet<Message> requests = new TreeSet<Message>();		  //The queue of waiting requests
 	private static final TreeSet<Message> writeRequests = new TreeSet<Message>();	  		//The queue of waiting write requests
 	private static final HashMap<Integer, LinkedList<Message>> requestsMap = new HashMap<Integer, LinkedList<Message>>(); //From pid to a request
-	private static TheaterService service = new TheaterService(pid);	//The theater service object
+	private static TheaterService service = new TheaterService(20);	//The theater service object
 	private static final int MAX_RESPONSE_TIME = 5000;	//The maximum response time of this system.
 	
 	//Synchronization locks
@@ -63,13 +63,16 @@ public class Server {
 		
 		//Get my pid.
 		ServerSocket serversocket = null;
+		System.out.println(InetAddress.getLocalHost().getHostAddress());
 		for(Process process : clusterInfo.values())
 			if(process.ip.equals(InetAddress.getLocalHost().getHostAddress()))
+				
 				try{
 					serversocket = new ServerSocket(process.port);
 					pid = process.pid;
 					break;
 				}catch(IOException e){}
+		
 		if(serversocket == null)
 			throw new IOException("Unable to find available port!");
 		clock = new Clock(0, pid);	//Then initialize my clock
@@ -350,13 +353,17 @@ public class Server {
 				//enter cs
 				requestCriticalSection(false);
 				String[] contents = ((String) msg.content).split(" ");
+				for(String s : contents){
+					System.out.println(s);	
+				}
 				try {
 					//Reservation is successful
 					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT,  (Serializable) seats, null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "You have successfully reserved Seat" + (Serializable)seats, null));
 					process.message_event_unlock();
+					System.out.println("Reservation Success!!");	
 				} catch (NumberFormatException e) {
 					
 				} catch (NoEnoughSeatsException e) {
@@ -369,7 +376,7 @@ public class Server {
 					//The reservation is repeated
 					process.message_event_lock();
 					updateClock();
-					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! The seats is not enough for your reservation! \n", null));
+					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Sorry! You have reserved the seats! \n", null));
 					process.message_event_unlock();
 				}
 				//release cs
@@ -461,14 +468,13 @@ public class Server {
 	 */
 	public static void main(String[] args){
 
-		final String file = args[0];
+		final String file = "servers.txt";
 		new Thread(){
 			@Override
 			public void run(){
 				try {
 					init(file);
 				} catch (FileNotFoundException e) {
-					// TODO Auto-generated catch block
 					e.printStackTrace();
 				} catch (IOException e) {
 					// TODO Auto-generated catch block
@@ -493,14 +499,14 @@ public class Server {
 //		}
 //		System.out.println("Test ends!");
 
-		try {
-			ServerSocket seversocket = new ServerSocket(45678 + pid);
-			seversocket.accept();
-			System.out.println("let's start!");
-			seversocket.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}	
+//		try {
+//			ServerSocket seversocket = new ServerSocket(45678 + pid);
+//			seversocket.accept();
+//			System.out.println("let's start!");
+//			seversocket.close();
+//		} catch (IOException e) {
+//			e.printStackTrace();
+//		}	
 
 	/*	for(int j=0; j<3; j++){
 			new Thread(){

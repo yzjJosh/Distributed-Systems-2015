@@ -52,7 +52,7 @@ public class ProcessForClient {
 	public void connect() throws IOException{
 		synchronized(lock){
 			Socket socket = new Socket(ip, port);
-			socket.setSoTimeout(5000);
+		  //  socket.setSoTimeout(10 * 1000);
 			send = new ObjectOutputStream(socket.getOutputStream());
 			receive = new ObjectInputStream(socket.getInputStream());
 		}
@@ -68,7 +68,6 @@ public class ProcessForClient {
 			throw new IOException("Process is not connected!");
 		synchronized(lock){
 			send.writeObject(msg);
-			send.flush();
 		}
 	}
 	
@@ -82,13 +81,27 @@ public class ProcessForClient {
 		if(receive == null)
 			throw new IOException("Process is not connected!");
 		Message ret = null;
-		synchronized(lock){
-			try {
-				ret = (Message)receive.readObject();
-			} catch (ClassNotFoundException e) {
-				e.printStackTrace();
-			}
+		
+		try {
+			ret = (Message)receive.readObject();
+		} catch (ClassNotFoundException e) {
+			e.printStackTrace();
 		}
+		
+//		
+//		synchronized(lock){
+//			try {
+//				ret = (Message)receive.readObject();
+//			} catch (ClassNotFoundException e) {
+//				e.printStackTrace();
+//			}
+//		}
 		return ret;
 	}
+	
+	@Override
+	public String toString(){
+		return "Process "+pid+": addr="+ip+":"+port+", live="+live;
+	}
+	
 }
