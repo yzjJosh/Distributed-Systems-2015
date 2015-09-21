@@ -138,8 +138,9 @@ public class Client extends JFrame {
 		scroll.setBounds(231,94,295,162);
 		getContentPane().add(scroll);
 		
+		
 		JLabel lblNewLabel = new JLabel("New label");
-		lblNewLabel.setIcon(new ImageIcon("/Users/mackbook/Distributed_System/Distributed-Systems-2015/Assignment2.4/Server/Stars.jpg"));
+		lblNewLabel.setIcon(new ImageIcon("Stars.jpg"));
 		lblNewLabel.setBounds(0, 0, 568, 290);
 		getContentPane().add(lblNewLabel);
 		
