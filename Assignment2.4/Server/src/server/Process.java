@@ -82,6 +82,7 @@ public class Process {
 	public synchronized void sendMessage(Message msg) throws IOException{
 		if(send == null)
 			throw new IOException("Process is not connected!");
+		send.reset();
 		send.writeObject(msg);
 		send.flush();
 	}

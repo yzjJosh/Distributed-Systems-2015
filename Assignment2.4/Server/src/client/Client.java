@@ -149,6 +149,8 @@ public class Client extends JFrame {
 	 * Randomly choose a server to connect
 	 */
 	public void connectToServer() {
+		for(ProcessForClient p : clusterInfo.values())
+			p.live = true;
 		int dieNum = 0;
 		while(true){
 			try {
@@ -197,7 +199,7 @@ public class Client extends JFrame {
 	
 	public static void main(String[] args) throws Exception{
 		final Client client = new Client();
-		String path = "servers.txt";
+		String path = args[0];
 		client.readServerInfo(path);
 
 		System.out.println(client.clusterInfo);

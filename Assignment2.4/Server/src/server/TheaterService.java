@@ -13,14 +13,14 @@ public class TheaterService implements Serializable {
 
 	private static final long serialVersionUID = 1L;
 	
-	private HashMap<String, Set<Integer>> reservedSeats; //Name to reserved seates.
+	private HashMap<String, HashSet<Integer>> reservedSeats; //Name to reserved seates.
 	Stack <Integer> emptySeats = new Stack <Integer>();
 	
 	public TheaterService(int numOfSeats) {
 		for(int i = 1; i <= numOfSeats; i++){
 			emptySeats.push(i);
 		}
-		reservedSeats  = new HashMap<String, Set<Integer>>();
+		reservedSeats  = new HashMap<String, HashSet<Integer>>();
 	}
 	/**
 	 * Reserve certain number of seats for client.
@@ -30,9 +30,9 @@ public class TheaterService implements Serializable {
 	 * @throws NoEnoughSeatesException When there is no enough seats.
 	 * @throws RepeateReservationException When the client has already reserved seats.
 	 */
-	public Set<Integer> reserve(String name, int count) throws NoEnoughSeatsException, RepeateReservationException{
+	public HashSet<Integer> reserve(String name, int count) throws NoEnoughSeatsException, RepeateReservationException{
 		
-		Set<Integer> set = new HashSet <Integer> ();
+		HashSet<Integer> set = new HashSet <Integer> ();
 		//If the client has already reserved seats, then throws an exception
 		if(reservedSeats.containsKey(name)) { 
 			throw new RepeateReservationException(reservedSeats.get(name));
@@ -57,7 +57,7 @@ public class TheaterService implements Serializable {
 	 * @return The result.
 	 * @throws NoReservationInfoException When cannot find information.
 	 */
-	public Set<Integer> search(String name) throws NoReservationInfoException{
+	public HashSet<Integer> search(String name) throws NoReservationInfoException{
 		System.out.println(name);
 		if(reservedSeats.containsKey(name)) {
 			return reservedSeats.get(name);

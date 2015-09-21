@@ -301,7 +301,8 @@ public class Server {
 				writeRequests.remove(msg);
 		}
 		//Then tell every server that I want to release the critical section
-		broadCastMessage(MessageType.CS_RELEASE, write? service: null);
+		TheaterService content = service;
+		broadCastMessage(MessageType.CS_RELEASE, write? content: null);
 		if(write) read_write_lock.release(MAX_READER_IN_A_SERVER);
 		else read_write_lock.release();
 	}
@@ -420,7 +421,7 @@ public class Server {
 
 				try {
 					//Reservation is successful
-					Set<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
+					HashSet<Integer> seats = service.reserve(contents[0], Integer.parseInt(contents[1]));
 					process.message_event_lock();
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Congratulations, " + contents[0] + "! You have successfully reserved Seat" + seats, null));
@@ -452,7 +453,7 @@ public class Server {
 				requestCriticalSection(true);
 				System.out.println("Received search request from client");
 				try {
-					Set <Integer> seats = service.search((String)msg.content);
+					HashSet <Integer> seats = service.search((String)msg.content);
 					process.message_event_lock();
 					updateClock();
 					process.sendMessage(new Message(MessageType.RESPOND_TO_CLIENT, "Hello! " +  "Mr/Ms " + (String)msg.content + "! Your reserved seats are " + seats.toString(), null));
