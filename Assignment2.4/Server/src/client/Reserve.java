@@ -64,17 +64,19 @@ public class Reserve extends JDialog {
 				//Start to send the name and count to the server
 				okButton.addActionListener(new ActionListener() {
 					public void actionPerformed(ActionEvent e) {
-						while(nameField.getText() == null || countField.getText() == null) {
-							JOptionPane.showMessageDialog(null,"There is null field!!");
+					
+						if(nameField.getText().equals("")|| countField.getText().equals("")) {
+							JOptionPane.showMessageDialog(null,"There is empty field!!");
+						}else {
+							String data = nameField.getText() + " " + countField.getText();
+							Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
+							try {
+								server.sendMessage(msg);
+							} catch (IOException e1) {
+								e1.printStackTrace();
+							}
+							dispose();	
 						}
-						String data = nameField.getText() + " " + countField.getText();
-						Message msg = new Message(MessageType.RESERVE_SEAT, data, null);
-						try {
-							server.sendMessage(msg);
-						} catch (IOException e1) {
-							e1.printStackTrace();
-						}
-					    dispose();
 					}
 				});
 				okButton.setActionCommand("OK");
