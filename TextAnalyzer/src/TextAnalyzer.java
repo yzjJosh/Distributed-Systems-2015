@@ -17,6 +17,7 @@ public class TextAnalyzer {
 				throws IOException {
 			//Convert the capital chars to lower chars.
 			String line = value.toString().toLowerCase();
+			line = line.trim();
 			String[] words = line.split("([^a-z0-9])+");
 			String[] contextWords = words.clone(); // Set up the context word array.
 			String[] queryWords = words.clone(); // Set up the query word array.
