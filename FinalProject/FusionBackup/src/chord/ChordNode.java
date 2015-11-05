@@ -8,5 +8,18 @@ package chord;
  * @author 	Yu Sun
  */
 public class ChordNode {
-
+	/**
+	 * The node's finger table. 
+	 */
+	protected FingerTable fingerTable;
+	/**
+	 * A reference to this node's successor. 
+	 */
+	protected ChordNode successor;
+	/**
+	 * A reference to this node's predecessor. 
+	 */
+	protected ChordNode predecessor;
+	
+	
 }
