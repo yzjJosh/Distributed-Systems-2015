@@ -1,4 +1,4 @@
-package interfaces;
+package dataStructures;
 
 import exceptions.RecoverFailureException;
 

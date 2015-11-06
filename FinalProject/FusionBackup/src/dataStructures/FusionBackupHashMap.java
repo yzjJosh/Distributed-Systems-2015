@@ -1,7 +1,5 @@
 package dataStructures;
 
-import interfaces.NumericalListEncodable;
-import interfaces.Recoverable;
 
 import java.io.Serializable;
 import java.util.*;
@@ -38,6 +36,10 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	 */
 	@Override
 	public V put(K key, V value) {
+		return putWithoutBackup(key, value);
+	}
+	
+	private V putWithoutBackup(K key, V value){
 		Node node = null;
 		if(map.containsKey(key)){
 			node = map.get(key);		
@@ -55,7 +57,7 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	 * Remove a key-value from the map, and update the backup data at the same time
 	 */
 	@Override
-	public V remove(Object key) {
+	public V remove(Object key){
 		Node node = map.remove(key);
 		if(node == null) return null;
 		Node tail = aux.get(aux.size()-1);
@@ -64,6 +66,7 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		aux.remove(aux.size()-1);
 		return node.val;
 	}
+	
 
 	/**
 	 * Put all key-value pairs from another map into this map, and update the backup data at the same time
@@ -230,8 +233,9 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 			return ret;
 		}
 
-		@Override
-		public NumericalListEncodable decode(ArrayList<Double> numericalList) {
+		
+		@SuppressWarnings("unused")
+		public static EncodableInteger decode(ArrayList<Double> numericalList) {
 			if(numericalList.size() == 0)
 				throw new DecodeException("Unable to decode from empty list!");
 			return new EncodableInteger(numericalList.get(0).intValue());
