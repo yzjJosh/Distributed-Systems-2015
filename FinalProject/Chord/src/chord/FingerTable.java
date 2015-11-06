@@ -22,4 +22,6 @@ public class FingerTable {
 			FingerTableEntry entry = new FingerTableEntry(start, interval_0, interval_1, successor);
 			finger.add(entry);
 		}
+		
+		
 }
