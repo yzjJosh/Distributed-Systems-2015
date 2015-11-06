@@ -17,6 +17,13 @@ public interface AuxiliaryDataStructure<K extends Serializable> {
 	 * @param node the added auxiliary node
 	 */
 	public void put(K key, AuxiliaryNode node);
+	
+	/**
+	 * Check if a key is already in this data structure
+	 * @param key the key
+	 * @return if it is in this data structure
+	 */
+	public boolean containsKey(K key);
 
 	/**
 	 * Remove an auxiliary node from this auxiliary data structure
@@ -32,5 +39,15 @@ public interface AuxiliaryDataStructure<K extends Serializable> {
 	 */
 	public AuxiliaryNode get(K key);
 	
+	/**
+	 * Get all the entries in this data structure
+	 * @return All entries
+	 */
 	public Iterable<DataEntry<K, AuxiliaryNode>> entries();
+
+	/**
+	 * Get the size of this data structure
+	 * @return the size
+	 */
+	public int size();
 }

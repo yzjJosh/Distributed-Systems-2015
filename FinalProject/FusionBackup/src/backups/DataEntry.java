@@ -20,5 +20,10 @@ public class DataEntry<K extends Serializable, V extends Serializable> implement
 		this.key = key;
 		this.value = value;
 	}
+	
+	@Override
+	public String toString(){
+		return key+"="+value;
+	}
 
 }

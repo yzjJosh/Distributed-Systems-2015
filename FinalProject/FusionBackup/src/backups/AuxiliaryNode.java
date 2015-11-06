@@ -17,4 +17,9 @@ public class AuxiliaryNode implements Serializable {
 		this.fusedNode = fusedNode;
 	}
 	
+	@Override
+	public String toString(){
+		return "AuxiliaryNode->fusedNode"+fusedNode.id;
+	}
+	
 }

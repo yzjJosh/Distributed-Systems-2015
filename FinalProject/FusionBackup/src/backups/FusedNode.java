@@ -1,6 +1,6 @@
 package backups;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 
 import org.jblas.DoubleMatrix;
 
@@ -11,20 +11,24 @@ import org.jblas.DoubleMatrix;
  */
 public class FusedNode{
 	
+	public final int id;
 	private final DoubleMatrix data;
-	private final ArrayList<AuxiliaryNode> auxs;
+	private final AuxiliaryNode[] auxs;
 	private final DoubleMatrix fuseVector;
+	private int fusedDataCount = 0;
 	
-	public FusedNode(int size, DoubleMatrix fuseVector){
+	public FusedNode(int size, DoubleMatrix fuseVector, int id){
 		if(size < 1)
 			throw new IllegalArgumentException("Illegal size "+size);
+		assert(fuseVector != null && fuseVector.length > 0);
 		data = DoubleMatrix.zeros(size);
-		auxs = new ArrayList<AuxiliaryNode>();
+		auxs = new AuxiliaryNode[fuseVector.length];
 		this.fuseVector = fuseVector;
+		this.id = id;
 	}
 	
 	public void updateData(DoubleMatrix prev, DoubleMatrix cur, int primaryId){
-		if(primaryId >= auxs.size() || primaryId < 0)
+		if(primaryId >= fuseVector.length || primaryId < 0)
 			throw new IndexOutOfBoundsException("Illegal primary id "+primaryId);
 		if(prev == null || cur == null)
 			throw new NullPointerException("Vector should be specified");
@@ -33,13 +37,33 @@ public class FusedNode{
 		data.addi(cur.sub(prev).mul(fuseVector.get(primaryId)));
 	}
 	
-	public DoubleMatrix getDusedData(){
+	public void setAuxiliaryNode(AuxiliaryNode node, int primaryId){
+		if(primaryId >= fuseVector.length || primaryId < 0)
+			throw new IndexOutOfBoundsException("Illegal primary id "+primaryId);
+		if(auxs[primaryId] == null && node != null)
+			fusedDataCount++;
+		else if(auxs[primaryId] != null && node == null)
+			fusedDataCount--;
+		auxs[primaryId] = node;
+	}
+	
+	public AuxiliaryNode getAuxiliaryNode(int primaryId){
+		if(primaryId >= fuseVector.length || primaryId < 0)
+			throw new IndexOutOfBoundsException("Illegal primary id "+primaryId);
+		return auxs[primaryId];
+	}
+	
+	public int fusedNodeNumber(){
+		return fusedDataCount;
+	}
+	
+	public DoubleMatrix getFusedData(){
 		return data;
 	}
 	
 	@Override
 	public String toString(){
-		return "{data="+data.toString()+", auxs="+auxs.toString()+"}";
+		return "{id="+id+", data="+data.toString()+", auxs="+Arrays.toString(auxs)+"}";
 	}
 	
 }
