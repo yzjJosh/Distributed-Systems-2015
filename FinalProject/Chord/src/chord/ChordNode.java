@@ -15,7 +15,7 @@ public class ChordNode {
 	/**
 	 * The identifier of this node
 	 */
-	public double identifier;
+	public int identifier;
 	/**
 	 * The node's finger table. 
 	 */
@@ -58,7 +58,8 @@ public class ChordNode {
 				//Specify a random port number.
 				int port = (int) (10000 + Math.random() * 10000);
 				String ip = InetAddress.getLocalHost().getHostAddress();
-				String data = port + ip + "\n";
+				int hash = (ip + "/" + port).hashCode();
+				String data = port + " " + ip + " " + hash + "\n";
 				writer.write(data);
 				writer.close();
 				
@@ -83,16 +84,34 @@ public class ChordNode {
 				throw new IOException("Unable to find available port!");
 	}
 	
-	
+	/**
+	 * Find the successor node for the given identifier.  The successor
+	 * node is the node responsible for storing any <key, value> pair
+	 * whose key hashes to the identifier being sought.
+	 * 
+	 * @param id The identifier being sought
+	 * 
+	 * @return The node responsible for id
+	 */
 	public ChordNode find_successor(int id) {
-		
+		ChordNode m = find_predecessor(id);
+		return m.successor;
 	}
 	
 	public ChordNode find_predecessor(int id) {
-		
+		ChordNode m = this;
+		while (id <= m.identifier || id > m.successor.identifier) {
+			m = m.closest_preceding_finger(id);
+		}
+		return m;
 	}
 	
 	public ChordNode closest_preceding_finger(int id) {
+		for (int i = 0; i < fingerTable.size; i++) {
+			if (fingerTable.finger.get(i).node > identifier && fingerTable.finger.get(i).node < id) {
+				return fingerTable.finger.get(i).node;			
+			}
+		}
 		
 	}
 	

@@ -10,6 +10,7 @@ import java.util.List;
 
 public class FingerTable {
 		List <FingerTableEntry> finger = new ArrayList<FingerTableEntry> ();
+		int size = 0;
 		/**
 		 * Add a new entry into the finger table of node n.
 		 * 
@@ -18,9 +19,10 @@ public class FingerTable {
 		 * @param interval_ 1: finger[k+1].start
 		 * @param successor: the previous node on the identifier circle
 		 */
-		public void addNewEntry(int start, int interval_0, int interval_1,  int successor) {
-			FingerTableEntry entry = new FingerTableEntry(start, interval_0, interval_1, successor);
+		public void addNewEntry(int start, int interval_0, int interval_1,  int node) {
+			FingerTableEntry entry = new FingerTableEntry(start, interval_0, interval_1, node);
 			finger.add(entry);
+			size++;
 		}
 		
 		

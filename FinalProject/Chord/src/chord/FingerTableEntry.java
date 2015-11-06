@@ -4,13 +4,13 @@ package chord;
  *  * @author 	Yu Sun
  */
 class FingerTableEntry {
-	private int start;
-	private int[] interval = new int[2];
-	private int successor;
-	public FingerTableEntry(int start, int interval_0, int interval_1,  int successor) {
+	protected int start;
+	protected int[] interval = new int[2];
+	protected int node;
+	public FingerTableEntry(int start, int interval_0, int interval_1,  int node) {
 		this.start = start;
 		this.interval[0] = interval_0;
 		this.interval[1] = interval_1;
-		this.successor = successor;
+		this.node = node;
 	}
 }
