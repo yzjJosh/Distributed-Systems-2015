@@ -4,10 +4,10 @@ package chord;
  *  * @author 	Yu Sun
  */
 class FingerTableEntry {
-	protected int start;
-	protected int[] interval = new int[2];
-	protected int node;
-	public FingerTableEntry(int start, int interval_0, int interval_1,  int node) {
+	protected ChordNode start;
+	protected ChordNode[] interval = new ChordNode[2];
+	protected ChordNode node;
+	public FingerTableEntry(ChordNode start, ChordNode interval_0, ChordNode interval_1,  ChordNode node) {
 		this.start = start;
 		this.interval[0] = interval_0;
 		this.interval[1] = interval_1;

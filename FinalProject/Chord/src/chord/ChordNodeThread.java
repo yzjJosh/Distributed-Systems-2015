@@ -27,10 +27,10 @@ public class ChordNodeThread extends Thread {
 	
 	@Override
 	public void run() {
-		try {
-			
-		} catch(IOException e) {
-			
-		}
+//		try {
+//			
+//		} catch(IOException e) {
+//			
+//		}
 	}
 }

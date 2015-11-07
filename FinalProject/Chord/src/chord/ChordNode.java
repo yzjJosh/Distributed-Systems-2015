@@ -11,7 +11,7 @@ import java.util.List;
  * 
  * @author 	Yu Sun
  */
-public class ChordNode {
+public class ChordNode implements Comparable<ChordNode> {
 	/**
 	 * The identifier of this node
 	 */
@@ -74,11 +74,11 @@ public class ChordNode {
 			System.out.println(e);
 		}
 		
-		try {
-			
-		} catch () {
-			
-		}
+//		try {
+//			
+//		} catch () {
+//			
+//		}
 		
 		if(serverSocket == null)
 				throw new IOException("Unable to find available port!");
@@ -106,14 +106,30 @@ public class ChordNode {
 		return m;
 	}
 	
+	@Override
+	public int compareTo(ChordNode o) {
+		if (identifier > o.identifier)
+			return 0;
+		else 
+			return 1;
+	}
+	
 	public ChordNode closest_preceding_finger(int id) {
+//		ChordNode a1 = null;
+//		ChordNode a2 = null;
+//		if(a1.compareTo(a2)) {
+//			
+//		}
 		for (int i = 0; i < fingerTable.size; i++) {
-			if (fingerTable.finger.get(i).node > identifier && fingerTable.finger.get(i).node < id) {
+			if (fingerTable.finger.get(i).node.identifier > this.identifier && fingerTable.finger.get(i).node.identifier < id) {
 				return fingerTable.finger.get(i).node;			
 			}
 		}
+		return this;
 		
 	}
+
+
 	
 
 	
