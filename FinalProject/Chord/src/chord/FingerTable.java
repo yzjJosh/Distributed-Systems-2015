@@ -9,7 +9,7 @@ import java.util.List;
  */
 
 public class FingerTable {
-		List <FingerTableEntry> finger = new ArrayList<FingerTableEntry> ();
+		List <FingerTableEntry> fingers = new ArrayList<FingerTableEntry> ();
 		int size = 0;
 		/**
 		 * Add a new entry into the finger table of node n.
@@ -19,10 +19,14 @@ public class FingerTable {
 		 * @param interval_ 1: finger[k+1].start
 		 * @param successor: the previous node on the identifier circle
 		 */
-		public void addNewEntry(ChordNode start, ChordNode interval_0, ChordNode interval_1,  ChordNode node) {
+		public void addNewEntry(ChordID start, ChordID interval_0, ChordID interval_1,  ChordNode node) {
 			FingerTableEntry entry = new FingerTableEntry(start, interval_0, interval_1, node);
-			finger.add(entry);
+			fingers.add(entry);
 			size++;
+		}
+		
+		public FingerTableEntry getFinger(int index) {
+			return fingers.get(index);
 		}
 		
 		

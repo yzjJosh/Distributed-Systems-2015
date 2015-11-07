@@ -1,6 +1,7 @@
 package chord;
 import java.io.*;
 import java.net.*;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -11,11 +12,11 @@ import java.util.List;
  * 
  * @author 	Yu Sun
  */
-public class ChordNode implements Comparable<ChordNode> {
+public class ChordNode  {
 	/**
 	 * The identifier of this node
 	 */
-	public int identifier;
+	ChordID identifier;
 	/**
 	 * The node's finger table. 
 	 */
@@ -33,7 +34,13 @@ public class ChordNode implements Comparable<ChordNode> {
 	private static final HashMap<Integer, String> clusterInfo = new HashMap<Integer, String>(); //Pid to every srever's process in the cluster.
 	protected List<Socket> socket = new LinkedList<Socket>(); 
 	protected static ServerSocket serverSocket = null;
-	public static void initConnection(String path, int maxNumOfSeates) throws IOException, FileNotFoundException {
+	
+	/**
+	 * The node event listener, if it exists. 
+	 */
+	protected ArrayList<NodeListener> listeners;
+	
+	public void initConnection(String path, int maxNumOfSeates) throws IOException, FileNotFoundException {
 		
 		String serverInfo;
 		BufferedReader reader = new BufferedReader(new FileReader(new File(path)));
@@ -42,7 +49,7 @@ public class ChordNode implements Comparable<ChordNode> {
 			String[] splits = serverInfo.split(" ");
 			String ip = splits[0];
 			int port = Integer.parseInt(splits[1]);	
-			int hash = (ip + "/" + port).hashCode();
+			int hash = Integer.parseInt(splits[2]);
 			clusterInfo.put(hash, serverInfo);
 			
 		}
@@ -58,8 +65,8 @@ public class ChordNode implements Comparable<ChordNode> {
 				//Specify a random port number.
 				int port = (int) (10000 + Math.random() * 10000);
 				String ip = InetAddress.getLocalHost().getHostAddress();
-				int hash = (ip + "/" + port).hashCode();
-				String data = port + " " + ip + " " + hash + "\n";
+				identifier = new ChordID(port + ip);
+				String data = port + " " + ip + " " + identifier + "\n";
 				writer.write(data);
 				writer.close();
 				
@@ -93,41 +100,95 @@ public class ChordNode implements Comparable<ChordNode> {
 	 * 
 	 * @return The node responsible for id
 	 */
-	public ChordNode find_successor(int id) {
+	public ChordNode find_successor(ChordID id) {
 		ChordNode m = find_predecessor(id);
 		return m.successor;
 	}
-	
-	public ChordNode find_predecessor(int id) {
+	/*ask node to find id's precessor
+	 * 
+	 */
+	public ChordNode find_predecessor(ChordID id) {
 		ChordNode m = this;
-		while (id <= m.identifier || id > m.successor.identifier) {
+		while ( ! id.isBetween(this.getChordID(), successor.getChordID()) && ! id.equals(successor.getChordID())) {
 			m = m.closest_preceding_finger(id);
 		}
 		return m;
 	}
 	
-	@Override
-	public int compareTo(ChordNode o) {
-		if (identifier > o.identifier)
-			return 0;
-		else 
-			return 1;
-	}
+
 	
-	public ChordNode closest_preceding_finger(int id) {
-//		ChordNode a1 = null;
-//		ChordNode a2 = null;
-//		if(a1.compareTo(a2)) {
-//			
-//		}
-		for (int i = 0; i < fingerTable.size; i++) {
-			if (fingerTable.finger.get(i).node.identifier > this.identifier && fingerTable.finger.get(i).node.identifier < id) {
-				return fingerTable.finger.get(i).node;			
+	public ChordNode closest_preceding_finger(ChordID id) {
+
+		for (int i = 31; i >= 0; i--) {
+			FingerTableEntry finger = fingerTable.getFinger(i);
+			ChordID fingerID = finger.getNode().getChordID();
+			if (fingerID.isBetween(this.getChordID(), id)) {
+				return finger.getNode();			
 			}
 		}
 		return this;
 		
 	}
+	
+	/**
+	 * Joins a Chord ring with a node in the Chord ring
+	 * 
+	 * @param node
+	 *            a bootstrapping node
+	 */
+	public void join(ChordNode node) {
+		predecessor = null;
+		successor = node.find_successor(this.getChordID());
+	}
+	
+	/**
+	 * Verifies the successor, and tells the successor about this node. Should
+	 * be called periodically.
+	 */
+	public void stabilize() {
+		ChordNode node = successor.getPredecessor();
+		if (node != null) {
+			ChordID key = node.getChordID();
+			if ((this == successor)
+					|| key.isBetween(this.getChordID(), successor.getChordID())) {
+				successor = node;
+			}
+		}
+		successor.notifyPredecessor(this);
+	}
+
+	private void notifyPredecessor(ChordNode node) {
+		ChordID key = node.getChordID();
+		if (predecessor == null
+				|| key.isBetween(predecessor.getChordID(), this.getChordID())) {
+			predecessor = node;
+		}
+	}
+
+	/**
+	 * Refreshes finger table entries.
+	 */
+	public void fixFingers() {
+		for (int i = 0; i < 32; i++) {
+			FingerTableEntry finger = fingerTable.getFinger(i);
+			ChordID key = finger.getStart();
+			finger.setNode(find_successor(key));
+		}
+	}
+	
+	public ChordID getChordID() {
+		return identifier;
+	}
+	
+	public ChordNode getPredecessor() {
+		return predecessor;
+	}
+	
+	public ChordNode getSuccessor() {
+		return successor;
+	}
+	
+	
 
 
 	
