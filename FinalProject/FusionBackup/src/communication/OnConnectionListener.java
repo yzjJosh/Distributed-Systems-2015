@@ -12,12 +12,12 @@ public interface OnConnectionListener {
 	 * @param manager the communication manager which this connection belongs to
 	 * @param id the id (unique in each communication manager) of this connection
 	 */
-	public void OnConnected(CommunicationManager manager, final int id);
+	public void OnConnected(final CommunicationManager manager, final int id);
 	
 	/**
 	 * Called when fails to establish a connection
 	 * @param manager the communication manager which performs this connection
 	 */
-	public void OnConnectFail(CommunicationManager manager);
+	public void OnConnectFail(final CommunicationManager manager);
 	
 }

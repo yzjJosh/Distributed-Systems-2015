@@ -2,6 +2,8 @@ package backups;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.net.Inet4Address;
+import java.net.UnknownHostException;
 import java.util.*;
 
 import org.jblas.DoubleMatrix;
@@ -9,6 +11,7 @@ import org.jblas.Solve;
 
 import communication.CommunicationManager;
 import communication.Message;
+import communication.MessageFilter;
 import communication.OnConnectionListener;
 import communication.OnMessageReceivedListener;
 import exceptions.BackupFailureException;
@@ -30,22 +33,21 @@ public class FusedRepository {
 	private final CommunicationManager manager;
 	private final HashMap<Integer, Integer> id2conncetion;
 	private final HashMap<Integer, Integer> connection2id;
+	private final Object mapLock = new Object();
 	
 	/**
 	 * Initialize this repository.
 	 * @param nodeSize The size of each node in this repository
 	 * @param volume The maximum number of primaries that can be fused into this repository
 	 * @param id the id of this repository
-	 * @param cluster the ip addresses and port number of this cluster
+	 * @param cluster a map which contains id-ip:port pair for nodes in this cluster, for example (2, "192.168.1.1:12345")
 	 */
 	@SuppressWarnings("unchecked")
-	public FusedRepository(int nodeSize, int volume, int id, HashMap<String, Integer> cluster){
+	public FusedRepository(int nodeSize, int volume, int id, HashMap<Integer, String> cluster){
 		if(nodeSize <= 0)
 			throw new IllegalArgumentException("Illegal nodeSize "+nodeSize);
 		if(volume <= 0)
 			throw new IllegalArgumentException("Illegal volume "+volume);
-		if(id < 0 || id >= volume)
-			throw new IllegalArgumentException("Illegal id "+id);
 		this.id = id;
 		this.nodeSize = nodeSize;
 		this.volume = volume;
@@ -55,12 +57,21 @@ public class FusedRepository {
 		this.manager = new CommunicationManager();
 		this.id2conncetion = new HashMap<Integer, Integer>();
 		this.connection2id = new HashMap<Integer, Integer>();
-		for(Map.Entry<String, Integer> entry : cluster.entrySet()){
+		for(Map.Entry<Integer, String> entry : cluster.entrySet()){
+			int nodeId = entry.getKey();
+			if(nodeId == id) continue;
+			String[] temp = entry.getValue().split(":");
+			String ip = temp[0];
+			int port = Integer.parseInt(temp[1]);
 			try {
-				final int connection = manager.connect(entry.getKey(), entry.getValue());
-				
+				int connection = manager.connect(ip, port);		
+				manager.setOnMessageReceivedListener(connection, new ClusterMessageListener(nodeId));		
 			} catch (IOException e) {}
 		}
+		int port = Integer.parseInt(cluster.get(id).split(":")[1]);
+		manager.waitForConnection(port, new ConnectionEstablishmentListener());
+		System.out.println("Waiting for clients at port "+port);
+		System.out.println("Fusion backup repository started! Node size: "+nodeSize+", volume: "+volume+", id: "+id);
 	}
 	
 	/**
@@ -216,31 +227,75 @@ public class FusedRepository {
 	}
 	
 	private class ClusterMessageListener implements OnMessageReceivedListener{
+		
+		private final int clusterId;
+		
+		public ClusterMessageListener(int clusterId){
+			this.clusterId = clusterId;
+		}
 
 		@Override
-		public void OnMessageReceived(CommunicationManager manager, int id,
-				Message msg) {
-			
+		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+			if(!msg.containsKey("MessageType")) return;
+			try {
+				switch((MessageType)msg.get("MessageType")){
+					case INFO_REQUEST:
+						manager.sendMessageForResponse(id, new Message().
+								put("MessageType", MessageType.INFO_RESPONSE).
+								put("NodeType", NodeType.REPOSITORY).
+								put("id", FusedRepository.this.id),
+								new MessageFilter(){
+									@Override
+									public boolean filter(Message msg) {
+										return msg != null && msg.containsKey("MessageType") && msg.get("MessageType") == MessageType.INFO_RESPONSE_ACK;
+									}	
+								}, 5000, new OnMessageReceivedListener(){
+
+									@Override
+									public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+										synchronized(mapLock){
+											id2conncetion.put(clusterId, id);
+											connection2id.put(id, clusterId);
+										}
+										System.out.println("Connected to repository node "+clusterId);
+									}
+
+									@Override
+									public void OnReceiveError(CommunicationManager manager, int id) {
+										System.err.println("ClusterMessageListener: Error! Unable to receive INFO_RESPONSE_ACK!");
+										manager.closeConnection(id);
+									}
+									
+								}, false);
+						break;
+					default:
+						break;
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
 
 		@Override
 		public void OnReceiveError(CommunicationManager manager, int id) {
-			
+			System.err.println("ClusterMessageListener: Error occurs when receiving message!");
+			manager.closeConnection(id);
 		}
 		
 	}
 	
 	private class ClientMessageListener implements OnMessageReceivedListener{
-
+		
+		
 		@Override
-		public void OnMessageReceived(CommunicationManager manager, int id,
-				Message msg) {
+		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
 			
 		}
 
 		@Override
 		public void OnReceiveError(CommunicationManager manager, int id) {
-			
+			System.err.println("ClientMessageListener: Error occurs when receiving message!");
+			manager.closeConnection(id);
 		}
 		
 	}
@@ -249,12 +304,57 @@ public class FusedRepository {
 
 		@Override
 		public void OnConnected(CommunicationManager manager, int id) {
-			
+			try {
+				manager.sendMessageForResponse(id, new Message().put("MessageType", MessageType.INFO_REQUEST), 
+						new MessageFilter(){
+							@Override
+							public boolean filter(Message msg) {
+								return msg != null && msg.containsKey("MessageType") && msg.get("MessageType") == MessageType.INFO_RESPONSE;
+							}
+				}, 5000, new OnMessageReceivedListener(){
+
+					@Override
+					public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+						try {
+							manager.sendMessage(id, new Message().put("MessageType", MessageType.INFO_RESPONSE_ACK));
+						} catch (IOException e) {
+							e.printStackTrace();
+							System.err.println("ConnectionEstablishmentListener: Error! Unable to send INFO_RESPONSE_ACK!");
+							manager.closeConnection(id);
+							return;
+						}
+						if(msg.get("NodeType") == NodeType.REPOSITORY){
+							int repoId = (Integer)msg.get("id");
+							synchronized(mapLock){
+								id2conncetion.put(repoId, id);
+								connection2id.put(id, repoId);
+							}
+							manager.setOnMessageReceivedListener(id, new ClusterMessageListener(repoId));
+							System.out.println("Connected to repository node "+repoId);
+						}else{
+							int primaryId = (Integer)msg.get("id");
+							manager.setOnMessageReceivedListener(id, new ClientMessageListener());
+							System.out.println("Connected to client node "+primaryId);
+						}
+					}
+
+					@Override
+					public void OnReceiveError(CommunicationManager manager, int id) {
+						System.err.println("ConnectionEstablishmentListener: Error! Unable to receive INFO_RESPONSE!");
+						manager.closeConnection(id);
+					}
+					
+				}, false);
+			} catch (IOException e) {
+				e.printStackTrace();
+				System.err.println("ConnectionEstablishmentListener: Error! Unable to send INFO_REQUEST!");
+				manager.closeConnection(id);
+			}
 		}
 
 		@Override
 		public void OnConnectFail(CommunicationManager manager) {
-			
+			System.err.println("ConnectionEstablishmentListener: Error occurs when establishing connection!");
 		}
 		
 	}
@@ -278,34 +378,18 @@ public class FusedRepository {
 		return str.toString();
 	}
 	
-	public static void main(String[] args){
-		FusedRepository repo = new FusedRepository(2, 4, 0, null);
-		try {
-			System.out.println(repo);
-			repo.putData("Fuck", null, new ArrayList<Double>(Arrays.asList(new Double[]{8.0, 5.5})), 0);
-			System.out.println(repo);
-			repo.putData("Fuck", null, new ArrayList<Double>(Arrays.asList(new Double[]{0.0, 5.5})), 1);
-			System.out.println(repo);
-			repo.putData("F", null, new ArrayList<Double>(Arrays.asList(new Double[]{2.0, 3.5})), 1);
-			System.out.println(repo);
-			repo.putData("G", null, new ArrayList<Double>(Arrays.asList(new Double[]{1.0, 5.5})), 1);
-			System.out.println(repo);
-			repo.putData("MM", null, new ArrayList<Double>(Arrays.asList(new Double[]{33.5, 5.5})), 0);
-			System.out.println(repo);
-			repo.putData("Josh", null, new ArrayList<Double>(Arrays.asList(new Double[]{45.9, 88.2})), 0);
-			System.out.println(repo);
-			repo.removeData("Fuck", new ArrayList<Double>(Arrays.asList(new Double[]{0.0, 5.5})), new ArrayList<Double>(Arrays.asList(new Double[]{1.0, 5.5})), 1);
-			System.out.println(repo);
-			System.out.println(repo.getData(0));
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-		
-		/*DoubleMatrix B = DoubleMatrix.concatHorizontally(DoubleMatrix.eye(4), repo.fuseVector);
-		DoubleMatrix D = DoubleMatrix.linspace(0, 3, 4);
-		DoubleMatrix P = D.transpose().mmul(B);
-		DoubleMatrix _P = P.get(0, new int[]{0,1,3,4});
-		DoubleMatrix _B = B.get(new int[]{0,1,2,3}, new int[]{0,1,3,4});
-		System.out.println(_P.mmul(Solve.pinv(_B)));*/
+	public static void main(String[] args) throws UnknownHostException{
+		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
+		String ip = Inet4Address.getLocalHost().getHostAddress();
+		cluster.put(0, ip+":12345");
+		cluster.put(1, ip+":12346");
+		cluster.put(2, ip+":12347");
+		cluster.put(3, ip+":12348");
+		cluster.put(4, ip+":12349");
+		FusedRepository repo0 = new FusedRepository(2, 4, 0, cluster);
+		FusedRepository repo1 = new FusedRepository(2, 4, 1, cluster);
+		FusedRepository repo2 = new FusedRepository(2, 4, 2, cluster);
+		FusedRepository repo3 = new FusedRepository(2, 4, 3, cluster);
+		FusedRepository repo4 = new FusedRepository(2, 4, 4, cluster);
 	}
 }

@@ -100,8 +100,8 @@ public class CommunicationManager {
 		}
 		if(connection == null) return;
 		final ConnectionThread fconncetion = connection;
-		final WaitReplyTask task = new WaitReplyTask(msg, filter, listener, null);
-		final Semaphore threadTerminal = new Semaphore(0);
+		Semaphore syncLock = new Semaphore(0);
+		final WaitReplyTask task = new WaitReplyTask(msg, filter, listener, null, syncLock);
 		final Semaphore messageSent = new Semaphore(0);
 		task.waitThread = new Thread(){
 			@Override
@@ -112,7 +112,6 @@ public class CommunicationManager {
 					fconncetion.removeWaitReplyTask(task);
 					listener.OnReceiveError(CommunicationManager.this, id);
 				} catch (InterruptedException e) {}
-				threadTerminal.release();
 			}
 		};
 		task.waitThread.start();
@@ -121,10 +120,23 @@ public class CommunicationManager {
 		messageSent.release();
 		if(sync)
 			try {
-				threadTerminal.acquire();
+				syncLock.acquire();
 			} catch (InterruptedException e) {
 				e.printStackTrace();
 			}
+	}
+	
+	/**
+	 * Close an established connection
+	 * @param id the id of the connection
+	 */
+	public void closeConnection(int id){
+		ConnectionThread connection = null;
+		synchronized (connections) {
+			connection = connections.get(id);
+		}
+		if(connection != null)
+			connection.cancelConnection();
 	}
 	
 	private int getConncetionId(){
@@ -166,22 +178,34 @@ public class CommunicationManager {
 			try {
 				ServerSocket server = new ServerSocket(port);
 				while (true) {
-					Socket socket = server.accept();
+					final Socket socket = server.accept();
 					id = getConncetionId();
 					ConnectionThread connectionThread = new ConnectionThread(id, socket);
 					synchronized (connections) {
 						connections.put(id, connectionThread);
 					}
+					final int fid = id;
 					if(listener != null)
-						listener.OnConnected(CommunicationManager.this, id);
+						new Thread(){
+							@Override
+							public void run(){
+								listener.OnConnected(CommunicationManager.this, fid);
+							}
+						}.start();
 					connectionThread.start();
 				}
 			} catch (IOException e) {
 				e.printStackTrace();
 				if(id > -1)
 					releaseConnectionId(id);
-				if(listener != null)
-					listener.OnConnectFail(CommunicationManager.this);
+				if(listener != null){
+					new Thread(){
+						@Override
+						public void run(){
+							listener.OnConnectFail(CommunicationManager.this);
+						}
+					}.start();	
+				}
 			}
 		}
 	}
@@ -194,8 +218,10 @@ public class CommunicationManager {
 		private OnMessageReceivedListener msgListener;
 		private final Object listenerLock = new Object();
 		private final Set<WaitReplyTask> waitReplyTasks = new HashSet<WaitReplyTask>();
+		private final Socket socket;
 			
 		public ConnectionThread(int id, Socket socket) throws IOException{
+			this.socket = socket;
 			this.connectionId = id;
 			this.ostream = new ObjectOutputStream(socket.getOutputStream());
 			this.istream = new ObjectInputStream(socket.getInputStream());
@@ -232,6 +258,13 @@ public class CommunicationManager {
 			ostream.writeObject(msg);
 		}
 		
+		public synchronized void cancelConnection(){
+			try {
+				socket.close();
+				System.err.println("CommunicationManager: Conncetion "+connectionId+" is closed!");
+			} catch (IOException e) {}
+		}
+		
 		@Override
 		public void run(){
 			try {
@@ -241,35 +274,69 @@ public class CommunicationManager {
 							Thread.sleep(1000);
 						}
 					} catch (InterruptedException e) {}
-					Message msg = (Message)istream.readObject();
+					final Message msg = (Message)istream.readObject();
 					synchronized(listenerLock){
-						if(msgListener != null)
-							msgListener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
+						if(msgListener != null){
+							final OnMessageReceivedListener listener = msgListener;
+							new Thread(){
+								@Override
+								public void run(){
+									listener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
+								}
+							}.start();
+						}
 					}
 					synchronized(waitReplyTasks){
 						LinkedList<WaitReplyTask> remove = new LinkedList<WaitReplyTask>();
-						for(WaitReplyTask task : waitReplyTasks)
+						LinkedList<Thread> threads = new LinkedList<Thread>();
+						for(final WaitReplyTask task : waitReplyTasks)
 							if(task.filter.filter(msg)){
 								task.waitThread.interrupt();
-								if(task.listener != null)
-									task.listener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
 								remove.add(task);
+								if(task.listener != null)
+									threads.add(new Thread(){
+										@Override
+										public void run(){
+											task.listener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
+											task.sync.release();
+										}
+									});
+								else
+									task.sync.release();
+										
 							}
 						for(WaitReplyTask task: remove)
 							waitReplyTasks.remove(task);
+						for(Thread thread : threads)
+							thread.start();
 					}
 				}
 			} catch (Exception e) {
 				e.printStackTrace();
 				synchronized(listenerLock){
-					if(msgListener != null)
-						msgListener.OnReceiveError(CommunicationManager.this, connectionId);
+					if(msgListener != null){
+						final OnMessageReceivedListener listener = msgListener;
+						new Thread(){
+							@Override
+							public void run(){
+								listener.OnReceiveError(CommunicationManager.this, connectionId);
+							}
+						}.start();
+					}
 				}
 				synchronized(waitReplyTasks){
-					for(WaitReplyTask task : waitReplyTasks){
+					for(final WaitReplyTask task : waitReplyTasks){
 						task.waitThread.interrupt();
 						if(task.listener != null)
-							task.listener.OnReceiveError(CommunicationManager.this, connectionId);
+							new Thread(){
+								@Override
+								public void run(){
+									task.listener.OnReceiveError(CommunicationManager.this, connectionId);
+									task.sync.release();
+								}
+							}.start();	
+						else
+							task.sync.release();	
 					}
 					waitReplyTasks.clear();
 				}
@@ -287,12 +354,14 @@ public class CommunicationManager {
 		public MessageFilter filter;
 		public OnMessageReceivedListener listener;
 		public Thread waitThread;
+		public Semaphore sync;
 		
-		public WaitReplyTask(Message msg, MessageFilter filter, OnMessageReceivedListener listener, Thread waitThread){
+		public WaitReplyTask(Message msg, MessageFilter filter, OnMessageReceivedListener listener, Thread waitThread, Semaphore sync){
 			this.msg = msg;
 			this.filter = filter;
 			this.listener = listener;
 			this.waitThread = waitThread;
+			this.sync = sync;
 		}
 	}
 	
