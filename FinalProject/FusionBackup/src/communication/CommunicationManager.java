@@ -313,10 +313,9 @@ public class CommunicationManager {
 					@Override
 					public void OnMessageReceived(CommunicationManager manager,
 							int id, Message msg) {
-						System.out.println("Server received message!");
-						msg.obj = 1;
+						System.out.println("Server received message: "+msg);
 						try {
-							manager.sendMessage(id, msg);
+							manager.sendMessage(id, msg.put("words", "I have received your messge! Yeah!"));
 						} catch (IOException e) {
 							e.printStackTrace();
 						}
@@ -340,11 +339,11 @@ public class CommunicationManager {
 		});
 		try {
 			int id = c.connect(Inet4Address.getLocalHost().getHostAddress(), 12345);
-			c.sendMessageForResponse(id, new Message(), new MessageFilter(){
+			c.sendMessageForResponse(id, new Message().put("I am client", "Josh"), new MessageFilter(){
 
 				@Override
 				public boolean filter(Message msg) {
-					return ((Integer)msg.obj) != 1;
+					return msg.containsKey("words");
 				}
 				
 			}, 5000, new OnMessageReceivedListener(){
@@ -352,12 +351,7 @@ public class CommunicationManager {
 				@Override
 				public void OnMessageReceived(CommunicationManager manager,
 						int id, Message msg) {
-					System.out.println("Received response!");
-					try {
-						manager.sendMessage(id, msg);
-					} catch (IOException e) {
-						e.printStackTrace();
-					}
+					System.out.println("Client receive message "+msg);
 				}
 
 				@Override

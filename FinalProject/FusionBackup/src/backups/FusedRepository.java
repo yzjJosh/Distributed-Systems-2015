@@ -1,11 +1,16 @@
 package backups;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.*;
 
 import org.jblas.DoubleMatrix;
 import org.jblas.Solve;
 
+import communication.CommunicationManager;
+import communication.Message;
+import communication.OnConnectionListener;
+import communication.OnMessageReceivedListener;
 import exceptions.BackupFailureException;
 import exceptions.RecoverFailureException;
 
@@ -22,15 +27,19 @@ public class FusedRepository {
 	private final DoubleMatrix fuseVector;
 	private final AuxiliaryDataStructure<Serializable>[] auxDataStructures;
 	private final ArrayList<FusedNode> dataStack;
+	private final CommunicationManager manager;
+	private final HashMap<Integer, Integer> id2conncetion;
+	private final HashMap<Integer, Integer> connection2id;
 	
 	/**
 	 * Initialize this repository.
 	 * @param nodeSize The size of each node in this repository
 	 * @param volume The maximum number of primaries that can be fused into this repository
 	 * @param id the id of this repository
+	 * @param cluster the ip addresses and port number of this cluster
 	 */
 	@SuppressWarnings("unchecked")
-	public FusedRepository(int nodeSize, int volume, int id){
+	public FusedRepository(int nodeSize, int volume, int id, HashMap<String, Integer> cluster){
 		if(nodeSize <= 0)
 			throw new IllegalArgumentException("Illegal nodeSize "+nodeSize);
 		if(volume <= 0)
@@ -43,6 +52,15 @@ public class FusedRepository {
 		this.fuseVector = generateFuseVector();
 		this.auxDataStructures = (AuxiliaryDataStructure<Serializable>[])new AuxiliaryDataStructure[volume];
 		this.dataStack = new ArrayList<FusedNode>();
+		this.manager = new CommunicationManager();
+		this.id2conncetion = new HashMap<Integer, Integer>();
+		this.connection2id = new HashMap<Integer, Integer>();
+		for(Map.Entry<String, Integer> entry : cluster.entrySet()){
+			try {
+				final int connection = manager.connect(entry.getKey(), entry.getValue());
+				
+			} catch (IOException e) {}
+		}
 	}
 	
 	/**
@@ -197,6 +215,50 @@ public class FusedRepository {
 		return Solve.pinv(DoubleMatrix.concatHorizontally(DoubleMatrix.eye(volume).get(new int[]{0,1,2,3}, new int[]{1,2,3}), fuseVector)).getColumn(primaryId);
 	}
 	
+	private class ClusterMessageListener implements OnMessageReceivedListener{
+
+		@Override
+		public void OnMessageReceived(CommunicationManager manager, int id,
+				Message msg) {
+			
+		}
+
+		@Override
+		public void OnReceiveError(CommunicationManager manager, int id) {
+			
+		}
+		
+	}
+	
+	private class ClientMessageListener implements OnMessageReceivedListener{
+
+		@Override
+		public void OnMessageReceived(CommunicationManager manager, int id,
+				Message msg) {
+			
+		}
+
+		@Override
+		public void OnReceiveError(CommunicationManager manager, int id) {
+			
+		}
+		
+	}
+	
+	private class ConnectionEstablishmentListener implements OnConnectionListener{
+
+		@Override
+		public void OnConnected(CommunicationManager manager, int id) {
+			
+		}
+
+		@Override
+		public void OnConnectFail(CommunicationManager manager) {
+			
+		}
+		
+	}
+	
 	@Override
 	public String toString(){
 		StringBuilder str = new StringBuilder("{\n");
@@ -217,7 +279,7 @@ public class FusedRepository {
 	}
 	
 	public static void main(String[] args){
-		FusedRepository repo = new FusedRepository(2, 4, 0);
+		FusedRepository repo = new FusedRepository(2, 4, 0, null);
 		try {
 			System.out.println(repo);
 			repo.putData("Fuck", null, new ArrayList<Double>(Arrays.asList(new Double[]{8.0, 5.5})), 0);

@@ -8,7 +8,7 @@ package communication;
 public interface OnMessageReceivedListener {
 
 	/**
-	 * Called when a message is received from a socket
+	 * Called when a message is received from a connection
 	 * @param socket the socket
 	 * @param id the id of this connection
 	 * @param msg the received message
