@@ -1,9 +1,18 @@
 package dataStructures;
 
-
+import java.io.IOException;
 import java.io.Serializable;
+import java.net.Inet4Address;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 
+import communication.CommunicationManager;
+import communication.Message;
+import communication.MessageFilter;
+import communication.OnMessageReceivedListener;
+import constants.MessageType;
+import constants.NodeType;
+import constants.UpdateType;
 import exceptions.DecodeException;
 import exceptions.RecoverFailureException;
 
@@ -14,21 +23,97 @@ import exceptions.RecoverFailureException;
  * @param <K> The type of key, which must be Serializable
  * @param <V> The type of value, which must be NumericalListEncodable
  */
-public class FusionBackupHashMap<K extends Serializable, V extends NumericalListEncodable> implements Map<K, V>, Recoverable{
+public class FusionBackupHashMap<K extends Serializable, V extends NumericalListEncodable> implements Map<K, V>{
 	
 	private final ArrayList<Node> aux;
-	private final Map<String, Integer> hosts;
 	private final HashMap<K, Node> map;
+	private final int id;
+	private final CommunicationManager manager;
+	private final HashMap<Integer, Integer> id2connection;
+	private final HashMap<Integer, Integer> connection2id;
+	private final Object mapLock = new Object();
+	private final Object updateLock = new Object();
 	
 	/**
-	 * Construct a fusion-backup hashmap with several specified remote backup nodes.
-	 * @param hosts A map which contains ipaddr-port# pairs of backup nodes.
+	 * Construct a fusion-backup hashmap with several specified remote backup nodes. If there is available backup, restore
+	 * this hashmap from backup; otherwise create a new hashmap.
+	 * @param hosts A map which contains id-ip:port pair for backup nodes, for example (2, "192.168.1.1:12345")
+	 * @param id the id of this hashmap. Id is the unique identifier to distinguish primaries in backup repository
 	 */
-	public FusionBackupHashMap(Map<String, Integer> hosts){
+	public FusionBackupHashMap(Map<Integer, String> hosts, int id){
 		super();
-		this.hosts = hosts;
 		this.map = new HashMap<K, Node>();
 		this.aux = new ArrayList<Node>();
+		this.id = id;
+		this.manager = new CommunicationManager();
+		this.id2connection = new HashMap<Integer, Integer>();
+		this.connection2id = new HashMap<Integer, Integer>();
+		if(hosts == null)
+			return;
+		LinkedList<Semaphore> semaphores = new LinkedList<Semaphore>();
+		for (Map.Entry<Integer, String> entry : hosts.entrySet()) {
+			final int nodeId = entry.getKey();
+			String[] temp = entry.getValue().split(":");
+			final String ip = temp[0];
+			final int port = Integer.parseInt(temp[1]);
+			final Semaphore semaphore = new Semaphore(0);
+			semaphores.add(semaphore);
+			new Thread() {
+				@Override
+				public void run() {
+					int connection = -1;
+					try {
+						connection = manager.connect(ip, port);
+						manager.sendMessageForResponse(
+								connection,
+								new Message()
+								.put("MessageType", MessageType.CONNECT_REQUEST)
+								.put("NodeType", NodeType.CLIENT)
+								.put("id",FusionBackupHashMap.this.id),
+								new MessageFilter() {
+									@Override
+									public boolean filter(Message msg) {
+										return msg != null && msg.containsKey("MessageType")
+												&& msg.get("MessageType") == MessageType.CONNECT_ACCEPTED;
+									}
+								}, 5000, new OnMessageReceivedListener() {
+									@Override
+									public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+										synchronized (mapLock) {
+											id2connection.put(nodeId, id);
+											connection2id.put(id, nodeId);
+										}
+										manager.setOnMessageReceivedListener(id, new MessageListener());
+										System.out.println("Connected to repository node "+ nodeId);
+									}
+
+									@Override
+									public void OnReceiveError(CommunicationManager manager, int id) {
+										manager.closeConnection(id);
+									}
+								}, true);
+
+					} catch (IOException e) {
+						if (connection >= 0)
+							manager.closeConnection(connection);
+					}
+					semaphore.release();
+				}
+			}.start();
+		}
+		for (Semaphore s : semaphores)
+			try {
+				s.acquire();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		try {
+			recover();
+			System.out.println("Recover successful!");
+		} catch (RecoverFailureException e) {
+			e.printStackTrace();
+			System.err.println("Recover fails! Create an empty hash map!");
+		}
 	}
 
 	/**
@@ -36,7 +121,30 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	 */
 	@Override
 	public V put(K key, V value) {
-		return putWithoutBackup(key, value);
+		if(containsKey(key) && (value == null && get(key) == null || value != null && value.equals(get(key))))
+			return value;
+		synchronized(updateLock){
+			V prev = putWithoutBackup(key, value);
+			ArrayList<Double> prevlist = prev==null? null: prev.encode();
+			ArrayList<Double> curlist = value==null? null: value.encode();
+			Message msg = new Message().put("MessageType", MessageType.BACKUP_UPDATE).
+										put("UpdateType", UpdateType.PUT).
+										put("key", key).
+										put("prev", prevlist).
+										put("cur", curlist);
+			Set<Integer> keySet = null;
+			synchronized(mapLock){
+				keySet = connection2id.keySet();
+			}
+			for(Integer connection: keySet)
+				try {
+					manager.sendMessage(connection, msg);
+				} catch (IOException e) {
+					e.printStackTrace();
+					System.err.println("Unable to back up operation!");
+				}
+			return prev; 
+		}
 	}
 	
 	private V putWithoutBackup(K key, V value){
@@ -58,13 +166,36 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	 */
 	@Override
 	public V remove(Object key){
-		Node node = map.remove(key);
-		if(node == null) return null;
-		Node tail = aux.get(aux.size()-1);
-		aux.set(node.paux, tail);
-		tail.paux = node.paux;
-		aux.remove(aux.size()-1);
-		return node.val;
+		if(!containsKey(key)) return null;
+		synchronized(updateLock){
+			Node node = map.remove(key);
+			if(node == null) return null;
+			Node tail = aux.get(aux.size()-1);
+			aux.set(node.paux, tail);
+			tail.paux = node.paux;
+			aux.remove(aux.size()-1);
+			
+			ArrayList<Double> val = node.val==null? null: node.val.encode();
+			ArrayList<Double> end = tail.val==null? null: tail.val.encode();
+			Message msg = new Message().put("MessageType", MessageType.BACKUP_UPDATE).
+										put("UpdateType", UpdateType.REMOVE).
+										put("key", (Serializable)key).
+										put("val", val).
+										put("end", end);
+			Set<Integer> keySet = null;
+			synchronized(mapLock){
+				keySet = connection2id.keySet();
+			}
+			for(Integer connection: keySet)
+				try {
+					manager.sendMessage(connection, msg);
+				} catch (IOException e) {
+					e.printStackTrace();
+					System.err.println("Unable to back up operation!");
+				}
+			
+			return node.val;
+		}
 	}
 	
 
@@ -82,8 +213,8 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	 */
 	@Override
 	public void clear() {
-		map.clear();
-		aux.clear();
+		for(K key: keySet())
+			remove(key);
 	}
 	
 	@Override
@@ -139,10 +270,39 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	}
 	
 	
-	@Override
-	public void recover() throws RecoverFailureException {
-		// TODO Auto-generated method stub
-		
+	private void recover() throws RecoverFailureException {
+		int connection = -1;
+		synchronized(mapLock){
+			if(connection2id.isEmpty())
+				throw new RecoverFailureException("No available backup node!");
+			connection = connection2id.keySet().iterator().next();
+		}
+		final HashMap<String, Boolean> result = new HashMap<String, Boolean>();
+		try {
+			manager.sendMessageForResponse(connection, 
+					new Message().put("MessageType", MessageType.RECOVER_REQUEST), 
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg != null && msg.containsKey("MessageType")
+									&& msg.get("MessageType") == MessageType.RECOVER_RESULT;
+						}
+					}, 10000,
+					new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							result.put("success", true);
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+						}
+					}, true);
+		} catch (IOException e) {
+			throw new RecoverFailureException("Unable to send RECOVER_REQUEST to repository!");
+		}
+		if(!(Boolean)result.get("success"))
+			throw new RecoverFailureException("Recover fails!");
 	}
 	
 	@Override
@@ -215,6 +375,26 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		
 	}
 	
+	private class MessageListener implements OnMessageReceivedListener{
+	
+
+		@Override
+		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+		}
+
+		@Override
+		public void OnReceiveError(CommunicationManager manager, int id) {
+			System.err.println("MessageListener: Error occurs when receiving message!");
+			manager.closeConnection(id);
+			synchronized(mapLock){
+				int nodeId = connection2id.get(id);
+				connection2id.remove(id);
+				id2connection.remove(nodeId);
+			}
+		}
+		
+	}
+	
 	//--------------------------------------------------------------------------------------------------------------------------------------------------------
 	//Following code is for testing!
 	
@@ -229,7 +409,7 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		@Override
 		public ArrayList<Double> encode() {
 			ArrayList<Double> ret = new ArrayList<Double>();
-			ret.add((double)val);
+			ret.add((double)(val==0? Integer.MIN_VALUE: val));
 			return ret;
 		}
 
@@ -238,7 +418,9 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		public static EncodableInteger decode(ArrayList<Double> numericalList) {
 			if(numericalList.size() == 0)
 				throw new DecodeException("Unable to decode from empty list!");
-			return new EncodableInteger(numericalList.get(0).intValue());
+			int result = numericalList.get(0).intValue();
+			result = result==Integer.MIN_VALUE? 0: result;
+			return new EncodableInteger(result);
 		}
 		
 		@Override
@@ -371,29 +553,67 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	 * Test
 	 * @param args
 	 */
-	public static void main(String[] args){
-		HashMap<String, EncodableInteger> hm = new HashMap<String, EncodableInteger>();
-		FusionBackupHashMap<String, EncodableInteger> fm = new FusionBackupHashMap<String, EncodableInteger>(null);
-		int testRound = 100;
-		for(int i=0; i<testRound; i++){
-			int testType = (int)(Math.random()*4);
-			switch(testType){
-				case 0:
-					testPut(hm ,fm, 5000+(int)(Math.random()*10000));
-					break;
-				case 1:
-					testRemove(hm ,fm, 2000+(int)(Math.random()*5000));
-					break;
-				case 2:
-					testPutAll(hm ,fm, 5000+(int)(Math.random()*10000));
-					break;
-				case 3:
-					testClear(hm, fm);
-					break;
-			}
-		}			
+	public static void main(String[] args) throws Exception{
+//		HashMap<String, EncodableInteger> hm = new HashMap<String, EncodableInteger>();
+//		FusionBackupHashMap<String, EncodableInteger> fm = new FusionBackupHashMap<String, EncodableInteger>(null, 0);
+//		int testRound = 100;
+//		for(int i=0; i<testRound; i++){
+//			int testType = (int)(Math.random()*4);
+//			switch(testType){
+//				case 0:
+//					testPut(hm ,fm, 5000+(int)(Math.random()*10000));
+//					break;
+//				case 1:
+//					testRemove(hm ,fm, 2000+(int)(Math.random()*5000));
+//					break;
+//				case 2:
+//					testPutAll(hm ,fm, 5000+(int)(Math.random()*10000));
+//					break;
+//				case 3:
+//					testClear(hm, fm);
+//					break;
+//			}
+//		}			
+//		
+//		System.out.println("Pass all tests!");
 		
-		System.out.println("Pass all tests!");
+		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
+		String ip = Inet4Address.getLocalHost().getHostAddress();
+		cluster.put(0, ip+":12345");
+		cluster.put(1, ip+":12346");
+		cluster.put(2, ip+":12347");
+		cluster.put(3, ip+":12348");
+		cluster.put(4, ip+":12349");
+		final FusionBackupHashMap<String, EncodableInteger> m0 = new FusionBackupHashMap<String, EncodableInteger>(cluster, 0);
+		final FusionBackupHashMap<String, EncodableInteger> m1 = new FusionBackupHashMap<String, EncodableInteger>(cluster, 1);
+		new Thread(){
+			@Override
+			public void run(){
+				for(int i=0; i<1000; i++){
+					String k = "str"+(int)(Math.random()*500);
+					EncodableInteger v = new EncodableInteger((int)(Math.random()*1000));
+					m0.put(k, v);
+				}
+				for(int i=0; i<1000; i++){
+					String k = "str"+(int)(Math.random()*500);
+					m0.remove(k);
+				}
+			}
+		}.start();
+		new Thread(){
+			@Override
+			public void run(){
+				for(int i=0; i<1000; i++){
+					String k = "str"+(int)(Math.random()*500);
+					EncodableInteger v = new EncodableInteger((int)(Math.random()*1000));
+					m1.put(k, v);
+				}
+				for(int i=0; i<1000; i++){
+					String k = "str"+(int)(Math.random()*500);
+					m1.remove(k);
+				}
+			}
+		}.start();
 	}
 
 }

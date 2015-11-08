@@ -3,7 +3,10 @@ package communication;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+
+import exceptions.TerminateException;
 
 /**
  * Communication manager manages all aspects of network communications
@@ -111,6 +114,7 @@ public class CommunicationManager {
 					messageSent.acquire();
 					fconncetion.removeWaitReplyTask(task);
 					listener.OnReceiveError(CommunicationManager.this, id);
+					task.sync.release();
 				} catch (InterruptedException e) {}
 			}
 		};
@@ -165,10 +169,29 @@ public class CommunicationManager {
 		
 		private final int port;
 		private final OnConnectionListener listener;
+		private final LinkedBlockingQueue<Runnable> listenerRunQueue = new LinkedBlockingQueue<Runnable>(1000);
+		private final Runnable stop = new Runnable(){
+			@Override
+			public void run(){
+				throw new TerminateException();
+			}
+		};
 		
 		public WaitConnectionThread(int port, OnConnectionListener connectionlistener){
 			this.port = port;
 			this.listener = connectionlistener;
+			new Thread(){
+				@Override
+				public void run(){
+					try {
+						while(true){
+							try {
+								listenerRunQueue.take().run();
+							} catch (InterruptedException e) {}
+						}
+					} catch (TerminateException e) {}
+				}
+			}.start();
 		}
 		
 		@Override
@@ -186,12 +209,16 @@ public class CommunicationManager {
 					}
 					final int fid = id;
 					if(listener != null)
-						new Thread(){
-							@Override
-							public void run(){
-								listener.OnConnected(CommunicationManager.this, fid);
-							}
-						}.start();
+						while(true)
+							try {
+								listenerRunQueue.put(new Runnable(){
+									@Override
+									public void run(){
+										listener.OnConnected(CommunicationManager.this, fid);
+									}
+								});
+								break;
+							} catch (InterruptedException e) {}
 					connectionThread.start();
 				}
 			} catch (IOException e) {
@@ -199,14 +226,23 @@ public class CommunicationManager {
 				if(id > -1)
 					releaseConnectionId(id);
 				if(listener != null){
-					new Thread(){
-						@Override
-						public void run(){
-							listener.OnConnectFail(CommunicationManager.this);
-						}
-					}.start();	
+					while(true)
+						try {
+							listenerRunQueue.put(new Runnable(){
+								@Override
+								public void run(){
+									listener.OnConnectFail(CommunicationManager.this);
+								}
+							});
+							break;
+						} catch (InterruptedException e1) {}	
 				}
 			}
+			while(true)
+				try {
+					listenerRunQueue.put(stop);
+					break;
+				} catch (InterruptedException e) {}
 		}
 	}
 	
@@ -219,12 +255,36 @@ public class CommunicationManager {
 		private final Object listenerLock = new Object();
 		private final Set<WaitReplyTask> waitReplyTasks = new HashSet<WaitReplyTask>();
 		private final Socket socket;
+		private final LinkedBlockingQueue<Runnable> listenerRunQueue = new LinkedBlockingQueue<Runnable>(1000);
+		private boolean exit = false;
+		private final Runnable stop = new Runnable(){
+			@Override
+			public void run(){
+				throw new TerminateException();
+			}
+		};
 			
 		public ConnectionThread(int id, Socket socket) throws IOException{
 			this.socket = socket;
 			this.connectionId = id;
 			this.ostream = new ObjectOutputStream(socket.getOutputStream());
 			this.istream = new ObjectInputStream(socket.getInputStream());
+			new Thread(){
+				@Override
+				public void run(){
+					try {
+						while(true){
+							try {
+								listenerRunQueue.take().run();
+							} catch (InterruptedException e) {}
+						}
+					} catch (TerminateException e) {}
+					exit = true;
+					while(ConnectionThread.this.getState() != Thread.State.TIMED_WAITING
+							&& ConnectionThread.this.getState() != Thread.State.TERMINATED);
+					ConnectionThread.this.interrupt();
+				}
+			}.start();
 		}
 		
 		public void setOnMessageReceivedListener(OnMessageReceivedListener msgListener){
@@ -278,37 +338,41 @@ public class CommunicationManager {
 					synchronized(listenerLock){
 						if(msgListener != null){
 							final OnMessageReceivedListener listener = msgListener;
-							new Thread(){
-								@Override
-								public void run(){
-									listener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
-								}
-							}.start();
+							while(true)
+								try {
+									listenerRunQueue.put(new Runnable(){
+										@Override
+										public void run(){
+											listener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
+										}
+									});
+									break;
+								} catch (InterruptedException e) {}
 						}
 					}
 					synchronized(waitReplyTasks){
 						LinkedList<WaitReplyTask> remove = new LinkedList<WaitReplyTask>();
-						LinkedList<Thread> threads = new LinkedList<Thread>();
 						for(final WaitReplyTask task : waitReplyTasks)
 							if(task.filter.filter(msg)){
 								task.waitThread.interrupt();
 								remove.add(task);
 								if(task.listener != null)
-									threads.add(new Thread(){
-										@Override
-										public void run(){
-											task.listener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
-											task.sync.release();
-										}
-									});
+									while(true)
+										try {
+											listenerRunQueue.put(new Runnable(){
+												@Override
+												public void run(){
+													task.listener.OnMessageReceived(CommunicationManager.this, connectionId, msg);
+													task.sync.release();
+												}
+											});
+											break;
+										} catch (InterruptedException e) {}
 								else
 									task.sync.release();
-										
 							}
 						for(WaitReplyTask task: remove)
 							waitReplyTasks.remove(task);
-						for(Thread thread : threads)
-							thread.start();
 					}
 				}
 			} catch (Exception e) {
@@ -316,31 +380,48 @@ public class CommunicationManager {
 				synchronized(listenerLock){
 					if(msgListener != null){
 						final OnMessageReceivedListener listener = msgListener;
-						new Thread(){
-							@Override
-							public void run(){
-								listener.OnReceiveError(CommunicationManager.this, connectionId);
-							}
-						}.start();
+						while(true)
+							try {
+								listenerRunQueue.put(new Runnable(){
+									@Override
+									public void run(){
+										listener.OnReceiveError(CommunicationManager.this, connectionId);
+									}
+								});
+								break;
+							} catch (InterruptedException e1) {}
 					}
 				}
 				synchronized(waitReplyTasks){
 					for(final WaitReplyTask task : waitReplyTasks){
 						task.waitThread.interrupt();
 						if(task.listener != null)
-							new Thread(){
-								@Override
-								public void run(){
-									task.listener.OnReceiveError(CommunicationManager.this, connectionId);
-									task.sync.release();
-								}
-							}.start();	
+							while(true)
+								try {
+									listenerRunQueue.put(new Runnable(){
+										@Override
+										public void run(){
+											task.listener.OnReceiveError(CommunicationManager.this, connectionId);
+											task.sync.release();
+										}
+									});
+									break;
+								} catch (InterruptedException e1) {}
 						else
 							task.sync.release();	
 					}
 					waitReplyTasks.clear();
 				}
 			}
+			while(true)
+				try {
+					listenerRunQueue.put(stop);
+					break;
+				} catch (InterruptedException e1) {}
+			while(!exit)
+				try {
+					Thread.sleep(1000);
+				} catch (InterruptedException e) {}
 			synchronized (connections) {
 				connections.remove(connectionId);
 			}
@@ -384,7 +465,7 @@ public class CommunicationManager {
 							int id, Message msg) {
 						System.out.println("Server received message: "+msg);
 						try {
-							manager.sendMessage(id, msg.put("words", "I have received your messge! Yeah!"));
+							manager.sendMessage(id, new Message().put("words", "I have received your messge! Yeah!"));
 						} catch (IOException e) {
 							e.printStackTrace();
 						}
@@ -412,10 +493,10 @@ public class CommunicationManager {
 
 				@Override
 				public boolean filter(Message msg) {
-					return msg.containsKey("words");
+					return !msg.containsKey("words");
 				}
 				
-			}, 5000, new OnMessageReceivedListener(){
+			}, 10000, new OnMessageReceivedListener(){
 
 				@Override
 				public void OnMessageReceived(CommunicationManager manager,

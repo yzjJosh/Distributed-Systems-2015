@@ -1,6 +1,7 @@
 package backups;
 
 import java.util.Arrays;
+import java.util.concurrent.Semaphore;
 
 import org.jblas.DoubleMatrix;
 
@@ -16,6 +17,7 @@ public class FusedNode{
 	private final AuxiliaryNode[] auxs;
 	private final DoubleMatrix fuseVector;
 	private int fusedDataCount = 0;
+	private final Semaphore lock = new Semaphore(1);
 	
 	public FusedNode(int size, DoubleMatrix fuseVector, int id){
 		if(size < 1)
@@ -59,6 +61,18 @@ public class FusedNode{
 	
 	public DoubleMatrix getFusedData(){
 		return data;
+	}
+	
+	public void lock(){
+		try {
+			lock.acquire();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public void unlock(){
+		lock.release();
 	}
 	
 	@Override
