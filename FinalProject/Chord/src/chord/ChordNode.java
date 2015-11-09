@@ -5,6 +5,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+
+import communication.CommunicationManager;
+import communication.Message;
+import communication.OnConnectionListener;
+import communication.OnMessageReceivedListener;
 /**
  * Provides all methods necessary for a user application. This includes methods
  * for changing connectivity to the network (create, join, leave) as well as for
@@ -33,12 +38,8 @@ public class ChordNode  {
 	private static final int MAX_RESPONSE_TIME = 5000;	//The maximum response time of this system.
 	private static final HashMap<Integer, String> clusterInfo = new HashMap<Integer, String>(); //Pid to every srever's process in the cluster.
 	protected List<Socket> socket = new LinkedList<Socket>(); 
-	protected static ServerSocket serverSocket = null;
+	protected static CommunicationManager manager = null;
 	
-	/**
-	 * The node event listener, if it exists. 
-	 */
-	protected ArrayList<NodeListener> listeners;
 	
 	public void initConnection(String path, int maxNumOfSeates) throws IOException, FileNotFoundException {
 		
@@ -69,26 +70,45 @@ public class ChordNode  {
 				String data = port + " " + ip + " " + identifier + "\n";
 				writer.write(data);
 				writer.close();
-				
-				serverSocket = new ServerSocket(port);
-				while (true) {
-					//Wait for the client to connect.
-					Socket client = serverSocket.accept(); 
-					new ChordNodeThread(client); 
+				 
+				manager.waitForConnection(port, new OnConnectionListener() {
+
+					@Override
+					public void OnConnected(CommunicationManager manager, int id) {
+						manager.setOnMessageReceivedListener(id, new OnMessageReceivedListener() {
+
+							@Override
+							public void OnMessageReceived(
+									CommunicationManager manager, int id,
+									Message msg) {
+								 
+								
+							}
+
+							@Override
+							public void OnReceiveError(
+									CommunicationManager manager, int id) {
+								System.err.println("Receipt of Message Failed!");
+								
+							}
+							
+						});
+						
+					}
+
+					@Override
+					public void OnConnectFail(CommunicationManager manager) {
+						System.err.println("Connection dFailed!");
+						
+					}
 					
-				}
+				});
+				
 		}catch(IOException e){
 			System.out.println(e);
 		}
 		
-//		try {
-//			
-//		} catch () {
-//			
-//		}
-		
-		if(serverSocket == null)
-				throw new IOException("Unable to find available port!");
+
 	}
 	
 	/**
