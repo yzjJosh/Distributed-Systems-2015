@@ -32,25 +32,24 @@ public class ChordNode implements Serializable {
 	/**
 	 * The node's finger table.
 	 */
-	protected FingerTable fingerTable;
+	protected FingerTable fingerTable = new FingerTable(this);
 	/**
 	 * A reference to this node's successor.
 	 */
-	protected ChordNode successor;
+	protected ChordNode successor = this;
 	/**
 	 * A reference to this node's predecessor.
 	 */
-	protected ChordNode predecessor;
+	protected ChordNode predecessor = null;
 
 	private static final int MAX_RESPONSE_TIME = 5000; // The maximum response time of this system.
 	private static final HashMap<Integer, String> clusterInfo = new HashMap<Integer, String>(); // information about other node.
 	private static final ArrayList<Integer> ids = new ArrayList<Integer>(); 
 															
-	protected List<Socket> socket = new LinkedList<Socket>();
-	protected static CommunicationManager manager = null;
+	protected transient List<Socket> socket = new LinkedList<Socket>();
+	protected static transient CommunicationManager manager = new CommunicationManager();
 
-	public void initConnection(String path, int maxNumOfSeates)
-			throws IOException, FileNotFoundException {
+	public void initConnection(String path) throws IOException, FileNotFoundException {
 
 		String serverInfo;
 		BufferedReader reader = new BufferedReader(new FileReader(
@@ -66,10 +65,6 @@ public class ChordNode implements Serializable {
 
 		}
 		reader.close();
-
-		// Get my pid.
-		System.out.println("My IP adress is: "
-				+ InetAddress.getLocalHost().getHostAddress());
 		// Write new node info into the file
 		BufferedWriter writer = new BufferedWriter(new FileWriter(
 				new File(path)));
@@ -80,49 +75,51 @@ public class ChordNode implements Serializable {
 		int port = (int) (10000 + Math.random() * 10000);
 		String ip = InetAddress.getLocalHost().getHostAddress();
 		identifier = new ChordID(port + ip);
-		String data = ip + " " + port + " " + identifier + "\n";
+		String data = ip + " " + port + " " + identifier.getID() + "\n";
+		System.out.println(data);
 		writer.write(data);
 		writer.close();
 		
-	
+	    
 		int num = clusterInfo.size();
-		int index = (int) Math.random() * num;
-		String[] splits = clusterInfo.get(ids.get(index)).split(" ");
-		String connect_ip = splits[0];
-		int connect_port = Integer.parseInt(splits[1]);
-		// Connect to an exsiting node
-		int id_link = manager.connect(connect_ip, connect_port);
-		manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
-
-			@Override
-			public void OnMessageReceived(CommunicationManager manager, int id,
-					Message msg) {
-		
+		if (num > 0) {
+			int index = (int) Math.random() * num;
+			String[] splits = clusterInfo.get(ids.get(index)).split(" ");
+			String connect_ip = splits[0];
+			int connect_port = Integer.parseInt(splits[1]);
+			// Connect to an exsiting node
+			int id_link = manager.connect(connect_ip, connect_port);
+			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
 				
-			}
-
-			@Override
-			public void OnReceiveError(CommunicationManager manager, int id) {
-			
-				
-			}
-			
-		});
-		try {
-		manager.sendMessageForResponse(id_link, new Message().put("RequstJoin", "WantToJoin"), new MessageFilter() {
-
-			@Override
-			public boolean filter(Message msg) {
-				if (msg != null) {
-					if (msg.containsKey("Reply")) {
-						return true;
-					}
+				@Override
+				public void OnMessageReceived(CommunicationManager manager, int id,
+						Message msg) {
+					
 				}
-				return false;
-			}		
-		}, MAX_RESPONSE_TIME,  new JoinMessageListener(this), false);
-		} catch (IOException e) {
-			System.err.println(e);
+				
+				@Override
+				public void OnReceiveError(CommunicationManager manager, int id) {
+					
+					
+				}
+				
+			});
+			try {
+				manager.sendMessageForResponse(id_link, new Message().put("RequestJoin", "WantToJoin"), new MessageFilter() {
+					
+					@Override
+					public boolean filter(Message msg) {
+						if (msg != null) {
+							if (msg.containsKey("Reply")) {
+								return true;
+							}
+						}
+						return false;
+					}		
+				}, MAX_RESPONSE_TIME,  new JoinMessageListener(this), false);
+			} catch (IOException e) {
+				System.err.println(e);
+			}
 		}
 		manager.waitForConnection(port, new ChordNodeListener(this));
 
@@ -224,6 +221,17 @@ public class ChordNode implements Serializable {
 
 	public ChordNode getSuccessor() {
 		return successor;
+	}
+	
+	public static void main(String[] args) {
+		ChordNode node = new ChordNode();
+	    try {
+			node.initConnection(args[0]);
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 
 }
