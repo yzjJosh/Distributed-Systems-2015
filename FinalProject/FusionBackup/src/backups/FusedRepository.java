@@ -613,17 +613,18 @@ public class FusedRepository {
 					if(msg.get("MessageType") != MessageType.CONNECT_REQUEST) return;
 					int nodeId = (Integer) msg.get("id");
 					NodeType type = (NodeType) msg.get("NodeType");
+					boolean success = false;
 					if(type == NodeType.CLIENT){
 						clientmapLock.writerLock();
 						if(nodeId<0 || nodeId>=volume || clientid2connection.containsKey(nodeId)){
 							manager.closeConnection(id);
 							System.err.println("ConnectionEstablishmentListener: illegal or duplicated client id "+nodeId+", rejected!");
-							return;
 						}else{
 							clientid2connection.put(nodeId, id);
 							connection2clientid.put(id, nodeId);
 							manager.setOnMessageReceivedListener(id, new ClientMessageListener());
 							System.out.println("ConnectionEstablishmentListener: Connected to client "+nodeId);
+							success = true;
 						}
 						clientmapLock.writerUnlock();
 					}else{
@@ -631,15 +632,16 @@ public class FusedRepository {
 						if(repoid2connection.containsKey(nodeId)){
 							manager.closeConnection(id);
 							System.err.println("ConnectionEstablishmentListener: duplicate connect from repository "+nodeId+", rejected!");
-							return;
 						}else{
 							repoid2connection.put(nodeId, id);
 							connection2repoid.put(id, nodeId);
 							manager.setOnMessageReceivedListener(id, new ClusterMessageListener());
 							System.out.println("ConnectionEstablishmentListener: Connected to repository "+nodeId);
+							success = true;
 						}
 						repomapLock.writerUnlock();
 					}
+					if(!success) return;
 					try {
 						manager.sendMessage(id, new Message().put("MessageType", MessageType.CONNECT_ACCEPTED));
 					} catch (IOException e) {

@@ -17,7 +17,7 @@ import exceptions.TerminateException;
 public class CommunicationManager {
 	
 	private TreeSet<Integer> idSet = new TreeSet<Integer>();
-	private int maxId = -1;
+	private int nextId = 0;
 	private Object idLock = new Object();
 	private HashMap<Integer, ConnectionThread> connections = new HashMap<Integer, ConnectionThread>();
 	
@@ -146,7 +146,7 @@ public class CommunicationManager {
 	private int getConncetionId(){
 		synchronized(idLock){
 			if(idSet.isEmpty()){
-				return ++maxId;
+				return nextId++;
 			}else
 				return idSet.pollFirst();
 		}
@@ -155,10 +155,10 @@ public class CommunicationManager {
 	
 	private void releaseConnectionId(int id){
 		synchronized(idLock){
-			if(id == maxId-1){
-				maxId --;
-				while(!idSet.isEmpty() && idSet.last() == maxId-1)
-					maxId = idSet.pollLast();
+			if(id == nextId-1){
+				nextId --;
+				while(!idSet.isEmpty() && idSet.last() == nextId-1)
+					nextId = idSet.pollLast();
 			}else
 				idSet.add(id);
 		}

@@ -502,7 +502,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 				throw new DecodeException("Unable to decode from empty list!");
 			if(source.size()>1 && source.get(0) == 1.0 && source.get(1) == 1.0)
 				return null;
-			return source.get(0).intValue();
+			return (int)Math.round(source.get(0));
 		}
 	}
 
@@ -680,7 +680,13 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 //		}.start();
 		System.out.println("m0: "+m0);
 		System.out.println("m1 "+m1);
-		m0.put("Josh", 0);
+		for(int i=0; i<100; i++){
+			m0.put(""+i, i);
+		}
+		for(int i=100; i<200; i++){
+			m1.put(""+i, i);
+		}
+		m0.put("Josh", 3);
 		m1.put("Jim", 1);
 	}
 
