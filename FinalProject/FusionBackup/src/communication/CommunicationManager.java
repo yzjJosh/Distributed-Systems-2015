@@ -376,7 +376,6 @@ public class CommunicationManager {
 					}
 				}
 			} catch (Exception e) {
-				e.printStackTrace();
 				synchronized(listenerLock){
 					if(msgListener != null){
 						final OnMessageReceivedListener listener = msgListener;

@@ -6,6 +6,7 @@ import java.net.Inet4Address;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 
+import backups.DataEntry;
 import communication.CommunicationManager;
 import communication.Message;
 import communication.MessageFilter;
@@ -23,7 +24,7 @@ import exceptions.RecoverFailureException;
  * @param <K> The type of key, which must be Serializable
  * @param <V> The type of value, which must be NumericalListEncodable
  */
-public class FusionBackupHashMap<K extends Serializable, V extends NumericalListEncodable> implements Map<K, V>{
+public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>{
 	
 	private final ArrayList<Node> aux;
 	private final HashMap<K, Node> map;
@@ -33,6 +34,7 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	private final HashMap<Integer, Integer> connection2id;
 	private final Object mapLock = new Object();
 	private final Object updateLock = new Object();
+	private final Coder<V> coder;
 	
 	/**
 	 * Construct a fusion-backup hashmap with several specified remote backup nodes. If there is available backup, restore
@@ -40,11 +42,16 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	 * @param hosts A map which contains id-ip:port pair for backup nodes, for example (2, "192.168.1.1:12345")
 	 * @param id the id of this hashmap. Id is the unique identifier to distinguish primaries in backup repository
 	 */
-	public FusionBackupHashMap(Map<Integer, String> hosts, int id){
+	public FusionBackupHashMap(Map<Integer, String> hosts, int id, Coder<V> coder){
 		super();
+		if(coder == null)
+			throw new IllegalArgumentException("Coder must be specified!");
+		if(id < 0)
+			throw new IllegalArgumentException("Illegal id "+id);
 		this.map = new HashMap<K, Node>();
 		this.aux = new ArrayList<Node>();
 		this.id = id;
+		this.coder = coder;
 		this.manager = new CommunicationManager();
 		this.id2connection = new HashMap<Integer, Integer>();
 		this.connection2id = new HashMap<Integer, Integer>();
@@ -125,8 +132,8 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 			return value;
 		synchronized(updateLock){
 			V prev = putWithoutBackup(key, value);
-			ArrayList<Double> prevlist = prev==null? null: prev.encode();
-			ArrayList<Double> curlist = value==null? null: value.encode();
+			ArrayList<Double> prevlist = coder.encode(prev);
+			ArrayList<Double> curlist = coder.encode(value);
 			Message msg = new Message().put("MessageType", MessageType.BACKUP_UPDATE).
 										put("UpdateType", UpdateType.PUT).
 										put("key", key).
@@ -175,8 +182,8 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 			tail.paux = node.paux;
 			aux.remove(aux.size()-1);
 			
-			ArrayList<Double> val = node.val==null? null: node.val.encode();
-			ArrayList<Double> end = tail.val==null? null: tail.val.encode();
+			ArrayList<Double> val = coder.encode(node.val);
+			ArrayList<Double> end = coder.encode(tail.val);
 			Message msg = new Message().put("MessageType", MessageType.BACKUP_UPDATE).
 										put("UpdateType", UpdateType.REMOVE).
 										put("key", (Serializable)key).
@@ -288,9 +295,19 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 									&& msg.get("MessageType") == MessageType.RECOVER_RESULT;
 						}
 					}, 10000,
-					new OnMessageReceivedListener(){
+					new OnMessageReceivedListener(){		
+						@SuppressWarnings("unchecked")
 						@Override
 						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							if(!(Boolean)msg.get("success")){
+								result.put("success", false);
+								return;
+							}
+							LinkedList<DataEntry<Serializable, ArrayList<Double>>> recover = 
+									(LinkedList<DataEntry<Serializable, ArrayList<Double>>>) msg.get("result");
+							assert(recover != null);
+							for(DataEntry<Serializable, ArrayList<Double>> entry : recover)
+								putWithoutBackup((K)entry.key, coder.decode(entry.value));
 							result.put("success", true);
 						}
 						@Override
@@ -380,6 +397,73 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 
 		@Override
 		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+			assert(msg.containsKey("MessageType"));
+			int nodeId = -1;
+			synchronized(mapLock){
+				nodeId = connection2id.get(id);
+			}
+			try {
+				switch((MessageType)msg.get("MessageType")){
+					case PAUSE_UPDATE:
+						final Semaphore s = new Semaphore(0);
+						final boolean[] lock = new boolean[1];
+						lock[0] = true;
+						final Thread pauseThread = new Thread(){
+							@Override
+							public void run(){
+								synchronized(updateLock){
+									s.release();
+									while(lock[0])
+										try {
+											Thread.sleep(1000);
+										} catch (InterruptedException e) {}
+								}
+							}
+						};
+						pauseThread.start();
+						s.acquire();
+						manager.sendMessageForResponse(id, new Message().put("MessageType", MessageType.UPDATE_PAUSED), 
+													   new MessageFilter(){
+														@Override
+														public boolean filter(Message msg) {
+															return msg != null && msg.containsKey("MessageType")
+																	&& msg.get("MessageType") == MessageType.RESUME_UPDATE;
+														}
+														}, 20000, 
+														new OnMessageReceivedListener(){
+															@Override
+															public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+																lock[0] = false;
+																pauseThread.interrupt();		
+															}
+															@Override
+															public void OnReceiveError(CommunicationManager manager, int id) {
+																System.err.println("Unable to receive RESUME_UPDATE!");
+																lock[0] = false;
+																pauseThread.interrupt();
+															}
+														}, false);
+						break;
+					case DATA_REQUEST:
+						ArrayList<ArrayList<Double>> data = new ArrayList<ArrayList<Double>>();
+						for(Node node: aux)
+							data.add(coder.encode(node.val));
+						manager.sendMessage(id, new Message().put("MessageType", MessageType.DATA_RESPONSE).
+															  put("data", data));
+						break;
+					case EXCEPTION:
+						System.err.println("ClusterMessageListener: Repository "+nodeId+" has internal error: "+msg.get("Exception"));
+					default:
+						break;
+				}
+			}catch(Exception e){
+				e.printStackTrace();
+				try {
+					manager.sendMessage(id, new Message().put("MessageType", MessageType.EXCEPTION).put("Exception", e));
+				} catch (IOException e1) {
+					e1.printStackTrace();
+				}
+			}
 		}
 
 		@Override
@@ -398,46 +482,27 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 	//--------------------------------------------------------------------------------------------------------------------------------------------------------
 	//Following code is for testing!
 	
-	private static class EncodableInteger implements NumericalListEncodable{
-		
-		public final int val;
-		
-		public EncodableInteger(int val){
-			this.val = val;
-		}
+	private static class IntegerCoder implements Coder<Integer>{
 
 		@Override
-		public ArrayList<Double> encode() {
+		public ArrayList<Double> encode(Integer target) {
 			ArrayList<Double> ret = new ArrayList<Double>();
-			ret.add((double)(val==0? Integer.MIN_VALUE: val));
+			if(target == null){
+				ret.add(1.0);
+				ret.add(1.0);
+			}else
+				ret.add((double)target);
 			return ret;
 		}
 
-		
-		@SuppressWarnings("unused")
-		public static EncodableInteger decode(ArrayList<Double> numericalList) {
-			if(numericalList.size() == 0)
+
+		@Override
+		public Integer decode(ArrayList<Double> source) {
+			if(source == null || source.size() == 0)
 				throw new DecodeException("Unable to decode from empty list!");
-			int result = numericalList.get(0).intValue();
-			result = result==Integer.MIN_VALUE? 0: result;
-			return new EncodableInteger(result);
-		}
-		
-		@Override
-		public int hashCode(){
-			return val;
-		}
-		
-		@Override
-		public boolean equals(Object obj){
-			if(obj == null) return false;
-			if(!(obj instanceof EncodableInteger)) return false;
-			return ((EncodableInteger)obj).val == val;
-		}
-		
-		@Override
-		public String toString(){
-			return val+"";
+			if(source.size()>1 && source.get(0) == 1.0 && source.get(1) == 1.0)
+				return null;
+			return source.get(0).intValue();
 		}
 	}
 
@@ -472,18 +537,17 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		assert(hm.toString().equals(fm.toString()));
 	}
 	
-	private static void testPut(HashMap<String, EncodableInteger> hm, FusionBackupHashMap<String, EncodableInteger> fm, int testCase){
+	private static void testPut(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm, int testCase){
 		System.out.println("Testing put ...");
-		List<FusionBackupHashMap<String, EncodableInteger>.Node> aux = fm.aux;
+		List<FusionBackupHashMap<String, Integer>.Node> aux = fm.aux;
 		for(int i=0; i<testCase; i++){
 			String k = "key"+(int)(Math.random()*testCase/2);
-			EncodableInteger v = new EncodableInteger((int)(Math.random()*testCase/2));
+			int v = (int)(Math.random()*testCase/2);
 			hm.put(k, v);
 			fm.put(k, v);
 		}
-		EncodableInteger _4 = new EncodableInteger(4);
-		hm.put(null, _4);
-		fm.put(null, _4);
+		hm.put(null, 4);
+		fm.put(null, 4);
 		hm.put("28", null);
 		fm.put("28", null);
 		methodTest(hm, fm);	
@@ -493,12 +557,12 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		System.out.println("pass!");
 	}
 	
-	private static void testRemove(HashMap<String, EncodableInteger> hm, FusionBackupHashMap<String, EncodableInteger> fm, int testCase){
+	private static void testRemove(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm, int testCase){
 		System.out.println("Testing remove ...");
-		List<FusionBackupHashMap<String, EncodableInteger>.Node> aux = fm.aux;
+		List<FusionBackupHashMap<String, Integer>.Node> aux = fm.aux;
 		for(int i=0; i<testCase; i++){
 			String k = "str"+(int)(Math.random()*testCase/2);
-			FusionBackupHashMap<String, EncodableInteger>.Node tail = null;
+			FusionBackupHashMap<String, Integer>.Node tail = null;
 			if(!aux.isEmpty())
 				tail = aux.get(aux.size()-1);
 			int kIndex = 0;
@@ -518,14 +582,14 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		System.out.println("pass!");
 	}
 	
-	private static void testPutAll(HashMap<String, EncodableInteger> hm, FusionBackupHashMap<String, EncodableInteger> fm, int testCase){
+	private static void testPutAll(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm, int testCase){
 		System.out.println("Testing put all ...");
-		List<FusionBackupHashMap<String, EncodableInteger>.Node> aux = fm.aux;
-		Map<String, EncodableInteger> add = new HashMap<String, EncodableInteger>();
+		List<FusionBackupHashMap<String, Integer>.Node> aux = fm.aux;
+		Map<String, Integer> add = new HashMap<String, Integer>();
 		testCase = 10000;
 		for(int i=0; i<testCase; i++){
 			String k = "key"+(int)(Math.random()*testCase/2);
-			EncodableInteger v = new EncodableInteger((int)(Math.random()*testCase/2));
+			int v = (int)(Math.random()*testCase/2);
 			add.put(k, v);
 		}
 		hm.putAll(add);
@@ -537,9 +601,9 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		System.out.println("pass!");
 	}
 	
-	private static void testClear(HashMap<String, EncodableInteger> hm, FusionBackupHashMap<String, EncodableInteger> fm){
+	private static void testClear(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm){
 		System.out.println("Testing clear ...");
-		List<FusionBackupHashMap<String, EncodableInteger>.Node> aux = fm.aux;
+		List<FusionBackupHashMap<String, Integer>.Node> aux = fm.aux;
 		hm.clear();
 		fm.clear();
 		methodTest(hm, fm);
@@ -584,36 +648,40 @@ public class FusionBackupHashMap<K extends Serializable, V extends NumericalList
 		cluster.put(2, ip+":12347");
 		cluster.put(3, ip+":12348");
 		cluster.put(4, ip+":12349");
-		final FusionBackupHashMap<String, EncodableInteger> m0 = new FusionBackupHashMap<String, EncodableInteger>(cluster, 0);
-		final FusionBackupHashMap<String, EncodableInteger> m1 = new FusionBackupHashMap<String, EncodableInteger>(cluster, 1);
-		new Thread(){
-			@Override
-			public void run(){
-				for(int i=0; i<1000; i++){
-					String k = "str"+(int)(Math.random()*500);
-					EncodableInteger v = new EncodableInteger((int)(Math.random()*1000));
-					m0.put(k, v);
-				}
-				for(int i=0; i<1000; i++){
-					String k = "str"+(int)(Math.random()*500);
-					m0.remove(k);
-				}
-			}
-		}.start();
-		new Thread(){
-			@Override
-			public void run(){
-				for(int i=0; i<1000; i++){
-					String k = "str"+(int)(Math.random()*500);
-					EncodableInteger v = new EncodableInteger((int)(Math.random()*1000));
-					m1.put(k, v);
-				}
-				for(int i=0; i<1000; i++){
-					String k = "str"+(int)(Math.random()*500);
-					m1.remove(k);
-				}
-			}
-		}.start();
+		final FusionBackupHashMap<String, Integer> m0 = new FusionBackupHashMap<String, Integer>(cluster, 0, new IntegerCoder());
+		final FusionBackupHashMap<String, Integer> m1 = new FusionBackupHashMap<String, Integer>(cluster, 1, new IntegerCoder());
+//		new Thread(){
+//			@Override
+//			public void run(){
+//				for(int i=0; i<1000; i++){
+//					String k = "str"+(int)(Math.random()*500);
+//					Integer v = (int)(Math.random()*1000);
+//					m0.put(k, v);
+//				}
+//				for(int i=0; i<1000; i++){
+//					String k = "str"+(int)(Math.random()*500);
+//					m0.remove(k);
+//				}
+//			}
+//		}.start();
+//		new Thread(){
+//			@Override
+//			public void run(){
+//				for(int i=0; i<1000; i++){
+//					String k = "str"+(int)(Math.random()*500);
+//					Integer v = (int)(Math.random()*1000);
+//					m1.put(k, v);
+//				}
+//				for(int i=0; i<1000; i++){
+//					String k = "str"+(int)(Math.random()*500);
+//					m1.remove(k);
+//				}
+//			}
+//		}.start();
+		System.out.println("m0: "+m0);
+		System.out.println("m1 "+m1);
+		m0.put("Josh", 0);
+		m1.put("Jim", 1);
 	}
 
 }

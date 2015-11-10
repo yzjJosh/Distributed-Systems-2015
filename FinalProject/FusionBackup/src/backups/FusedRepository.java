@@ -9,6 +9,8 @@ import java.util.concurrent.Semaphore;
 
 import org.jblas.DoubleMatrix;
 import org.jblas.Solve;
+import org.jblas.ranges.IndicesRange;
+import org.jblas.ranges.IntervalRange;
 
 import communication.CommunicationManager;
 import communication.Message;
@@ -19,9 +21,7 @@ import constants.MessageType;
 import constants.NodeType;
 import constants.UpdateType;
 import exceptions.BackupFailureException;
-import exceptions.DuplicateConnectionException;
 import exceptions.RecoverFailureException;
-import exceptions.RemoteInternalErrorException;
 
 /**
  * Repository of fused backup data.
@@ -41,8 +41,8 @@ public class FusedRepository {
 	private final HashMap<Integer, Integer> connection2repoid;
 	private final HashMap<Integer, Integer> clientid2connection;
 	private final HashMap<Integer, Integer> connection2clientid;
-	private final Object repomapLock = new Object();
-	private final Object clientmapLock = new Object();
+	private final WriterReaderLock repomapLock = new WriterReaderLock(20);
+	private final WriterReaderLock clientmapLock = new WriterReaderLock(20);
 	private final FusedNode lockNode;
 	
 	/**
@@ -99,10 +99,10 @@ public class FusedRepository {
 								new OnMessageReceivedListener(){
 									@Override
 									public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-											synchronized(repomapLock){
-												repoid2connection.put(nodeId, id);
-												connection2repoid.put(id, nodeId);
-											}
+											repomapLock.writerLock();
+											repoid2connection.put(nodeId, id);
+											connection2repoid.put(id, nodeId);
+											repomapLock.writerUnlock();
 											manager.setOnMessageReceivedListener(id, new ClusterMessageListener());
 											System.out.println("Connected to repository node "+nodeId);
 									}
@@ -165,7 +165,7 @@ public class FusedRepository {
 				}
 				end.unlock();
 				AuxiliaryNode anode = null;
-				fnode.updateData(covertToDataVector(prev), covertToDataVector(cur), primaryId);
+				fnode.updateData(new DoubleMatrix(nodeSize), covertToDataVector(cur), primaryId);
 				anode = new AuxiliaryNode(fnode);
 				fnode.setAuxiliaryNode(anode, primaryId);
 				fnode.unlock();
@@ -224,27 +224,28 @@ public class FusedRepository {
 		return ret;
 	}
 	
-	private DoubleMatrix generateFuseVector(){
-		int n = volume;
-		DoubleMatrix A = new DoubleMatrix(n, n);
-		DoubleMatrix vector = DoubleMatrix.ones(n);
-		DoubleMatrix mul = DoubleMatrix.linspace(1, n, n);
+	private DoubleMatrix generateVandermondeMatrix(int m, int n){
+		DoubleMatrix vander = new DoubleMatrix(m, n);
+		DoubleMatrix vector = DoubleMatrix.ones(m);
+		DoubleMatrix mul = DoubleMatrix.linspace(1, m, m);
 		for(int i=0; i<n; i++){
-			A.putColumn(i, vector);
+			vander.putColumn(i, vector);
 			vector = vector.mul(mul);
 		}
-		for(int i=0; i<id; i++)
-			vector = vector.mul(mul);
-		return Solve.solve(A, vector);
+		return vander;
+	}
+	
+	private DoubleMatrix generateFuseVector(){
+		DoubleMatrix vander = generateVandermondeMatrix(volume, volume+id+1);
+		return Solve.solve(vander.get(new IntervalRange(0, volume), new IntervalRange(0, volume)), vander.getColumn(volume+id));
 	}
 	
 	private DoubleMatrix covertToDataVector(ArrayList<Double> data){
-		if(data != null && data.size() > nodeSize)
-			throw new IllegalArgumentException("Data size "+data.size()+" exceeds node size "+nodeSize);
+		if(data == null || data.size() > nodeSize)
+			throw new IllegalArgumentException("Illegal list received "+data);
 		DoubleMatrix ret = DoubleMatrix.zeros(nodeSize);
-		if(data != null)
-			for(int i=0; i<data.size(); i++)
-				ret.put(i, data.get(i));
+		for(int i=0; i<data.size(); i++)
+			ret.put(i, data.get(i));
 		return ret;
 	}
 	
@@ -264,13 +265,13 @@ public class FusedRepository {
 				throw new IllegalArgumentException("Illegal primary id "+primaryId);
 			if(auxDataStructures[primaryId] == null)
 				throw new RecoverFailureException("Data of primary "+primaryId+" is not in this repository!");
-			ArrayList<DoubleMatrix> matrixes = getEncodedMatrixes();
-			assert(matrixes != null && matrixes.size() == dataStack.size());
-			DoubleMatrix recoverVector = getRecoverVector(primaryId);
+			ArrayList<DoubleMatrix> matrices = new ArrayList<DoubleMatrix>();
+			DoubleMatrix recoverVector = getEncodedmatricesAndRecoverVector(matrices, primaryId);
+			assert(matrices.size() == dataStack.size());
 			assert(recoverVector != null && recoverVector.length == volume);
 			LinkedList<DataEntry<Serializable, ArrayList<Double>>> ret = new LinkedList<DataEntry<Serializable, ArrayList<Double>>>();
 			for(DataEntry<Serializable, AuxiliaryNode> entry : auxDataStructures[primaryId].entries()){
-				DoubleMatrix decodedData = matrixes.get(entry.value.fusedNode.id).mmul(recoverVector);
+				DoubleMatrix decodedData = matrices.get(entry.value.fusedNode.id).mmul(recoverVector);
 				ret.add(new DataEntry<Serializable, ArrayList<Double>>(entry.key, convertToArrayList(decodedData)));
 			}
 			return ret;
@@ -280,24 +281,200 @@ public class FusedRepository {
 		}
 	}
 	
-	private ArrayList<DoubleMatrix> getEncodedMatrixes(){
-		ArrayList<DoubleMatrix> ret= new ArrayList<DoubleMatrix>();
-		DoubleMatrix mat = new DoubleMatrix(nodeSize, volume);
-		mat.putColumn(0, new DoubleMatrix(new double[]{1.0, 5.5}));
-		mat.putColumn(volume-1, dataStack.get(0).getFusedData());
-		ret.add(mat);
-		mat = new DoubleMatrix(nodeSize, volume);
-		mat.putColumn(0, new DoubleMatrix(new double[]{2.0, 3.5}));
-		mat.putColumn(volume-1, dataStack.get(1).getFusedData());
-		ret.add(mat);
-		mat = new DoubleMatrix(nodeSize, volume);
-		mat.putColumn(volume-1, dataStack.get(2).getFusedData());
-		ret.add(mat);
-		return ret;
+	private boolean hasData(int primaryId){
+		if(primaryId >= volume || primaryId < 0)
+			throw new IllegalArgumentException("Illegal primary id "+primaryId);
+		return !(auxDataStructures[primaryId] == null || auxDataStructures[primaryId].size() == 0);
 	}
 	
-	private DoubleMatrix getRecoverVector(int primaryId){
-		return Solve.pinv(DoubleMatrix.concatHorizontally(DoubleMatrix.eye(volume).get(new int[]{0,1,2,3}, new int[]{1,2,3}), fuseVector)).getColumn(primaryId);
+	private DoubleMatrix getEncodedmatricesAndRecoverVector(ArrayList<DoubleMatrix> matrices, int primary) throws RecoverFailureException{
+		clientmapLock.readerLock();
+		repomapLock.readerLock();
+		try {
+			LinkedList<Integer> empties = new LinkedList<Integer>();
+			int columns = 0;
+			for(int i=0; i<volume; i++)
+				if(!hasData(i)){
+					columns++;
+					empties.add(i);
+				}
+				else if(clientid2connection.containsKey(i))
+					columns++;
+			columns += repoid2connection.size();
+			if(columns < volume)
+				throw new RecoverFailureException("Only "+columns+" columns can be collected! Unable to recover!");
+			//First round, pause all operations
+			LinkedList<Semaphore> semaphores = new LinkedList<Semaphore>();
+			final Thread waitThread = Thread.currentThread();
+			for(final Integer connection: connection2clientid.keySet()){
+				final Semaphore s = new Semaphore(0);
+				semaphores.add(s);
+				manager.sendMessageForResponse(connection, 
+						new Message().put("MessageType", MessageType.PAUSE_UPDATE),
+						new MessageFilter(){
+					@Override
+					public boolean filter(Message msg) {
+						return msg!=null && msg.containsKey("MessageType") 
+								&& msg.get("MessageType") == MessageType.UPDATE_PAUSED;
+					}
+				}, 5000, new OnMessageReceivedListener(){
+					@Override
+					public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+						s.release();
+					}
+					@Override
+					public void OnReceiveError(CommunicationManager manager, int id) {
+						System.err.println("Unable to receive UPDATE_PAUSED from connection "+connection);
+						waitThread.interrupt();
+					}	
+				}, false);
+			}
+			for(Semaphore s : semaphores)
+				s.acquire();
+			final ArrayList<HashMap<Integer, DoubleMatrix>> rawData = new ArrayList<HashMap<Integer, DoubleMatrix>>();
+			for(FusedNode fnode: dataStack){
+				HashMap<Integer, DoubleMatrix> node = new HashMap<Integer, DoubleMatrix>();
+				node.put(id+volume, fnode.getFusedData());
+				rawData.add(node);
+			}
+			final LinkedList<Integer> columnQueue = new LinkedList<Integer>();
+			columnQueue.add(id+volume);
+			columnQueue.addAll(empties);
+			//Second round, require data from these primaries
+			semaphores = new LinkedList<Semaphore>();
+			for(Map.Entry<Integer, Integer> entry: clientid2connection.entrySet()){
+				final int primaryId = entry.getKey();
+				if(!hasData(primaryId)) continue;
+				final int connection = entry.getValue();
+				final Semaphore s = new Semaphore(0);
+				semaphores.add(s);
+				manager.sendMessageForResponse(connection, 
+						new Message().put("MessageType", MessageType.DATA_REQUEST),
+						new MessageFilter(){
+					@Override
+					public boolean filter(Message msg) {
+						return msg!=null && msg.containsKey("MessageType") 
+								&& msg.get("MessageType") == MessageType.DATA_RESPONSE;
+					}
+				}, 5000, new OnMessageReceivedListener(){
+					@SuppressWarnings("unchecked")
+					@Override
+					public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+						ArrayList<ArrayList<Double>> data = (ArrayList<ArrayList<Double>>) msg.get("data");
+						assert(data != null);
+						if(data.size() == auxDataStructures[primaryId].size()){
+							synchronized(columnQueue){
+								if(columnQueue.size() == volume){
+									s.release();
+									return;
+								}
+								columnQueue.add(primaryId);
+							}
+							for(int i=0; i<data.size(); i++){
+								HashMap<Integer, DoubleMatrix> node = rawData.get(i);
+								node.put(primaryId, covertToDataVector(data.get(i)));
+							}
+						}
+						s.release();
+					}
+					@Override
+					public void OnReceiveError(CommunicationManager manager, int id) {
+						System.err.println("Unable to receive DATA_RESPONSE from connection "+connection);
+						s.release();
+					}	
+				}, false);
+			}
+			for(Semaphore s : semaphores)
+				s.acquire();
+
+			if(columnQueue.size() < volume){
+				//Third Round, get data from repositories
+				semaphores = new LinkedList<Semaphore>();
+				for(Map.Entry<Integer, Integer> entry: repoid2connection.entrySet()){
+					final int repoId = entry.getKey();
+					final int connection = entry.getValue();
+					final Semaphore s = new Semaphore(0);
+					semaphores.add(s);
+					manager.sendMessageForResponse(connection, 
+							new Message().put("MessageType", MessageType.DATA_REQUEST),
+							new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg!=null && msg.containsKey("MessageType") 
+									&& msg.get("MessageType") == MessageType.DATA_RESPONSE;
+						}
+					}, 5000, new OnMessageReceivedListener(){
+						@SuppressWarnings("unchecked")
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							ArrayList<ArrayList<Double>> data = (ArrayList<ArrayList<Double>>) msg.get("data");
+							assert(data != null);
+							if(data.size() == dataStack.size()){
+								synchronized(columnQueue){
+									if(columnQueue.size() == volume){
+										s.release();
+										return;
+									}
+									columnQueue.add(repoId+volume);
+								}
+								for(int i=0; i<data.size(); i++){
+									HashMap<Integer, DoubleMatrix> node = rawData.get(i);
+									node.put(repoId+volume, covertToDataVector(data.get(i)));
+								}
+							}
+							s.release();
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							System.err.println("Unable to receive DATA_RESPONSE from connection "+connection);
+							s.release();
+						}	
+					}, false);
+				}
+				for(Semaphore s : semaphores)
+					s.acquire();
+			}
+
+			//Generate data matrices
+			if(columnQueue.size() < volume)
+				throw new RecoverFailureException("Unable to collect enough columns! Only "+columnQueue.size()+" columns got!");
+			assert(columnQueue.size() == volume);
+			Collections.sort(columnQueue);
+			for(HashMap<Integer, DoubleMatrix> node: rawData){
+				DoubleMatrix matrix = new DoubleMatrix(nodeSize, volume);
+				for(int i=0; i<columnQueue.size(); i++){
+					int column = columnQueue.get(i);
+					if(node.containsKey(column))
+						matrix.putColumn(i, node.get(column));
+				}
+				matrices.add(matrix);
+			}							
+
+			DoubleMatrix vander = generateVandermondeMatrix(volume, Collections.max(columnQueue)+1);
+			DoubleMatrix A = vander.get(new IntervalRange(0, vander.rows), new IntervalRange(0, vander.rows));
+			DoubleMatrix B = vander.get(new IntervalRange(0, vander.rows), new IntervalRange(vander.rows, vander.columns));
+			DoubleMatrix X = Solve.solve(A, B);
+			DoubleMatrix Convert = DoubleMatrix.concatHorizontally(DoubleMatrix.eye(vander.rows), X);
+			int[] indices = new int[columnQueue.size()];
+			for(int i=0; i<indices.length; i++)
+				indices[i] = columnQueue.get(i);
+			Convert = Convert.get(new IntervalRange(0, Convert.rows), new IndicesRange(indices));
+			assert(Convert.rows == Convert.columns);
+			return Solve.pinv(Convert).getColumn(primary);
+		} catch (Exception e) {
+			throw new RecoverFailureException("Unable to get encoded matrix due to "+e);
+		} finally{
+			for(final Integer connection: connection2clientid.keySet()){
+				try {
+					manager.sendMessage(connection, new Message().put("MessageType", MessageType.RESUME_UPDATE));
+				} catch (IOException e) {
+					System.err.println("Error! Unable to send RESUME_UPDATE!");
+				}
+			}
+			repomapLock.readerUnlock();	
+			clientmapLock.readerUnlock();
+		}
+
 	}
 	
 	private class ClusterMessageListener implements OnMessageReceivedListener{
@@ -305,12 +482,19 @@ public class FusedRepository {
 		@Override
 		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
 			assert(msg.containsKey("MessageType"));
-			int nodeId = -1;
-			synchronized(repomapLock){
-				nodeId = connection2repoid.get(id);
-			}
+			repomapLock.readerLock();
+			final int nodeId = connection2repoid.get(id);
+			repomapLock.readerUnlock();
 			try {
 				switch((MessageType)msg.get("MessageType")){
+					case DATA_REQUEST:
+						ArrayList<ArrayList<Double>> data = new ArrayList<ArrayList<Double>>();
+						for(FusedNode node: dataStack){
+							data.add(convertToArrayList(node.getFusedData()));
+						}
+						manager.sendMessage(id, new Message().put("MessageType", MessageType.DATA_RESPONSE).
+															  put("data", data));
+						break;
 					case EXCEPTION:
 						System.err.println("ClusterMessageListener: Cluster "+nodeId+" has internal error: "+msg.get("Exception"));
 					default:
@@ -330,25 +514,23 @@ public class FusedRepository {
 		public void OnReceiveError(CommunicationManager manager, int id) {
 			System.err.println("ClusterMessageListener: Error occurs when receiving message!");
 			manager.closeConnection(id);
-			synchronized(repomapLock){
-				int repoId = connection2repoid.remove(id);
-				repoid2connection.remove(repoId);
-			}
+			repomapLock.writerLock();
+			int repoId = connection2repoid.remove(id);
+			repoid2connection.remove(repoId);
+			repomapLock.writerUnlock();
 		}
 		
 	}
 	
 	private class ClientMessageListener implements OnMessageReceivedListener{
-		int i=0;
 		
 		@SuppressWarnings("unchecked")
 		@Override
-		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+		public void OnMessageReceived(final CommunicationManager manager, final int id, Message msg) {
 			assert(msg.containsKey("MessageType"));
-			int clientId = -1;
-			synchronized(clientmapLock){
-				clientId = connection2clientid.get(id);
-			}
+			clientmapLock.readerLock();
+			final int clientId = connection2clientid.get(id);
+			clientmapLock.readerUnlock();
 			try {
 				switch((MessageType)msg.get("MessageType")){
 					case BACKUP_UPDATE:
@@ -358,18 +540,42 @@ public class FusedRepository {
 								ArrayList<Double> prev = (ArrayList<Double>)msg.get("prev");
 								ArrayList<Double> cur = (ArrayList<Double>)msg.get("cur");
 								putData(key, prev, cur, clientId);
-								System.out.println("put "+(++i)+" times");
 								break;
 							case REMOVE:
 								key = msg.get("key");
 								ArrayList<Double> val = (ArrayList<Double>)msg.get("val");
 								ArrayList<Double> end = (ArrayList<Double>)msg.get("end");
 								removeData(key, val, end, clientId);
-								System.out.println("remove "+(--i)+" times");
 								break;
 						}
 						break;
-					case RECOVER_REQUEST:
+					case RECOVER_REQUEST:						
+						if(!hasData(clientId)){
+							Message reply = new Message().put("MessageType", MessageType.RECOVER_RESULT);
+							reply.put("success", true).
+								  put("result", new LinkedList<DataEntry<Serializable, ArrayList<Double>>>());
+							manager.sendMessage(id, reply);
+						}else{
+							new Thread(){
+								@Override
+								public void run(){
+									Message reply = new Message().put("MessageType", MessageType.RECOVER_RESULT);
+									try{
+										LinkedList<DataEntry<Serializable, ArrayList<Double>>> result = getData(clientId);
+										reply.put("success", true).
+											  put("result", result);
+									}catch(RecoverFailureException e){
+										e.printStackTrace();
+										reply.put("success", false);
+									}
+									try {
+										manager.sendMessage(id, reply);
+									} catch (IOException e) {
+										System.err.println("Unable to send RECOVER_RESULT");
+									}
+								}
+							}.start();
+						}
 						break;
 					case EXCEPTION:
 						System.err.println("ClientMessageListener: Client "+clientId+" has internal error: "+msg.get("Exception"));
@@ -390,10 +596,10 @@ public class FusedRepository {
 		public void OnReceiveError(CommunicationManager manager, int id) {
 			System.err.println("ClientMessageListener: Error occurs when receiving message!");
 			manager.closeConnection(id);
-			synchronized(clientmapLock){
-				int clientId = connection2clientid.remove(id);
-				clientid2connection.remove(clientId);
-			}
+			clientmapLock.writerLock();
+			int clientId = connection2clientid.remove(id);
+			clientid2connection.remove(clientId);
+			clientmapLock.writerUnlock();
 		}
 		
 	}
@@ -408,48 +614,48 @@ public class FusedRepository {
 					int nodeId = (Integer) msg.get("id");
 					NodeType type = (NodeType) msg.get("NodeType");
 					if(type == NodeType.CLIENT){
-						synchronized(clientmapLock){
-							if(nodeId<0 || nodeId>=volume || clientid2connection.containsKey(nodeId)){
-								manager.closeConnection(id);
-								System.err.println("ConnectionEstablishmentListener: illegal or duplicated client id "+nodeId+", rejected!");
-								return;
-							}else{
-								clientid2connection.put(nodeId, id);
-								connection2clientid.put(id, nodeId);
-								manager.setOnMessageReceivedListener(id, new ClientMessageListener());
-								System.out.println("ConnectionEstablishmentListener: Connected to client "+nodeId);
-							}
+						clientmapLock.writerLock();
+						if(nodeId<0 || nodeId>=volume || clientid2connection.containsKey(nodeId)){
+							manager.closeConnection(id);
+							System.err.println("ConnectionEstablishmentListener: illegal or duplicated client id "+nodeId+", rejected!");
+							return;
+						}else{
+							clientid2connection.put(nodeId, id);
+							connection2clientid.put(id, nodeId);
+							manager.setOnMessageReceivedListener(id, new ClientMessageListener());
+							System.out.println("ConnectionEstablishmentListener: Connected to client "+nodeId);
 						}
+						clientmapLock.writerUnlock();
 					}else{
-						synchronized(repomapLock){
-							if(repoid2connection.containsKey(nodeId)){
-								manager.closeConnection(id);
-								System.err.println("ConnectionEstablishmentListener: duplicate connect from repository "+nodeId+", rejected!");
-								return;
-							}else{
-								repoid2connection.put(nodeId, id);
-								connection2repoid.put(id, nodeId);
-								manager.setOnMessageReceivedListener(id, new ClusterMessageListener());
-								System.out.println("ConnectionEstablishmentListener: Connected to repository "+nodeId);
-							}
+						repomapLock.writerLock();
+						if(repoid2connection.containsKey(nodeId)){
+							manager.closeConnection(id);
+							System.err.println("ConnectionEstablishmentListener: duplicate connect from repository "+nodeId+", rejected!");
+							return;
+						}else{
+							repoid2connection.put(nodeId, id);
+							connection2repoid.put(id, nodeId);
+							manager.setOnMessageReceivedListener(id, new ClusterMessageListener());
+							System.out.println("ConnectionEstablishmentListener: Connected to repository "+nodeId);
 						}
+						repomapLock.writerUnlock();
 					}
 					try {
 						manager.sendMessage(id, new Message().put("MessageType", MessageType.CONNECT_ACCEPTED));
 					} catch (IOException e) {
 						e.printStackTrace();
-						synchronized(clientmapLock){
-							if(connection2clientid.containsKey(id)){
-								connection2clientid.remove(id);
-								clientid2connection.remove(nodeId);
-							}
+						clientmapLock.writerLock();
+						if(connection2clientid.containsKey(id)){
+							connection2clientid.remove(id);
+							clientid2connection.remove(nodeId);
 						}
-						synchronized(repomapLock){
-							if(connection2repoid.containsKey(id)){
-								connection2repoid.remove(id);
-								repoid2connection.remove(nodeId);
-							}
+						clientmapLock.writerUnlock();
+						repomapLock.writerLock();
+						if(connection2repoid.containsKey(id)){
+							connection2repoid.remove(id);
+							repoid2connection.remove(nodeId);
 						}
+						repomapLock.writerUnlock();
 						System.err.println("ConnectionEstablishmentListener: Unable to send CONNECT_ACCEPTED!");
 						manager.closeConnection(id);
 					}
