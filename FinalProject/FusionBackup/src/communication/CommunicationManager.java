@@ -335,6 +335,7 @@ public class CommunicationManager {
 						}
 					} catch (InterruptedException e) {}
 					final Message msg = (Message)istream.readObject();
+					System.out.println(msg);
 					synchronized(listenerLock){
 						if(msgListener != null){
 							final OnMessageReceivedListener listener = msgListener;

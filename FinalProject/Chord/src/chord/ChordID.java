@@ -1,9 +1,16 @@
 package chord;
+
+import java.io.Serializable;
+
 /**
  * The identifier of each node.
  * @author 	Yu Sun
  */
-public class ChordID implements Comparable {
+public class ChordID implements Comparable, Serializable{
+	/**
+	 * 
+	 */
+	private static final long serialVersionUID = 1L;
 	private int id = 0;
 	public ChordID (String identifier) {
 		id = identifier.hashCode(); 

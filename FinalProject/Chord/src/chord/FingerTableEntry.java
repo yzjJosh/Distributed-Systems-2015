@@ -1,9 +1,12 @@
 package chord;
+
+import java.io.Serializable;
+
 /**
  * The node's finger table entry. 
  *  * @author 	Yu Sun
  */
-class FingerTableEntry {
+class FingerTableEntry implements Serializable {
 	protected ChordID start;
 	protected ChordID[] interval = new ChordID[2];
 	protected ChordNode node;
@@ -13,6 +16,12 @@ class FingerTableEntry {
 		this.interval[1] = interval_1;
 		this.node = node;
 	}
+	
+	public FingerTableEntry(ChordID start, ChordNode node) {
+		this.start = start;
+		this.node = node;
+	}
+	
 	public ChordNode getNode() {
 		return node;
 	}
