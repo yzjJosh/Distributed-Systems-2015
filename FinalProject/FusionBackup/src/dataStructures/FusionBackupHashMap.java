@@ -128,7 +128,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	 */
 	@Override
 	public V put(K key, V value) {
-		if(containsKey(key) && (value == null && get(key) == null || value != null && value.equals(get(key))))
+		if(containsKey(key) && equals(value, get(key)))
 			return value;
 		synchronized(updateLock){
 			V prev = putWithoutBackup(key, value);
@@ -220,7 +220,9 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	 */
 	@Override
 	public void clear() {
-		for(K key: keySet())
+		HashSet<K> keys = new HashSet<K>();
+		keys.addAll(keySet());
+		for(K key: keys)
 			remove(key);
 	}
 	
@@ -325,6 +327,10 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	@Override
 	public String toString(){
 		return map.toString();
+	}
+	
+	private static boolean equals(Object a, Object b){
+		return (a==null && b==null) || (a!=null && a.equals(b));
 	}
 	
 	private class Node{
@@ -483,6 +489,10 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	//Following code is for testing!
 	
 	private static class IntegerCoder implements Coder<Integer>{
+		
+		private int toInt(double d){
+			return (int)Math.round(d);
+		}
 
 		@Override
 		public ArrayList<Double> encode(Integer target) {
@@ -500,41 +510,57 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		public Integer decode(ArrayList<Double> source) {
 			if(source == null || source.size() == 0)
 				throw new DecodeException("Unable to decode from empty list!");
-			if(source.size()>1 && source.get(0) == 1.0 && source.get(1) == 1.0)
+			if(source.size()>1 && toInt(source.get(0)) == 1 && toInt(source.get(1)) == 1)
 				return null;
-			return (int)Math.round(source.get(0));
+			return toInt(source.get(0));
 		}
 	}
+	
 
-	private static <K, V> void methodTest(Map<K, V> hm, Map<K, V> fm){
+	private static <K, V> void testEquality(Map<K, V> hm, Map<K, V> fm){
 		assert(hm.size() == fm.size());
 		assert(fm.isEmpty() == hm.isEmpty());
-		Iterator<Map.Entry<K, V>> hi = hm.entrySet().iterator();
-		Iterator<Map.Entry<K, V>> fi = fm.entrySet().iterator();
-		while(hi.hasNext()){
-			Map.Entry<K, V> e1 = hi.next();
-			Map.Entry<K, V> e2 = fi.next();
-			assert(e1.getKey() == e2.getKey());
-			assert(e1.getValue() == e2.getValue());
+		Set<Map.Entry<K, V>> hes = hm.entrySet();
+		Set<Map.Entry<K, V>> fes = fm.entrySet();
+		assert(hes.size() == fes.size());
+		for(Map.Entry<K, V> entry: hes){
+			assert(fm.containsKey(entry.getKey()));
+			assert(hm.containsKey(entry.getKey()));
+			assert(equals(hm.get(entry.getKey()), fm.get(entry.getKey()))): hm.get(entry.getKey())+" vs "+fm.get(entry.getKey());
+			assert(fm.containsValue(entry.getValue()));
+			assert(hm.containsValue(entry.getValue()));
 		}
-		Iterator<K> hki = hm.keySet().iterator();
-		Iterator<K> fki = hm.keySet().iterator();
-		while(hki.hasNext()){
-			K k1 = hki.next();
-			K k2 = fki.next();
-			assert(k1 == k2);
-			assert(hm.get(k1) == fm.get(k2));
-			assert(hm.containsKey(k1) == fm.containsKey(k2));
+		for(Map.Entry<K, V> entry: fes){
+			assert(fm.containsKey(entry.getKey()));
+			assert(hm.containsKey(entry.getKey()));
+			assert(equals(hm.get(entry.getKey()), fm.get(entry.getKey()))): hm.get(entry.getKey())+" vs "+fm.get(entry.getKey());
+			assert(fm.containsValue(entry.getValue()));
+			assert(hm.containsValue(entry.getValue()));
 		}
-		Iterator<V> hvi = hm.values().iterator();
-		Iterator<V> fvi = fm.values().iterator();
-		while(hvi.hasNext()){
-			V v1 = hvi.next();
-			V v2 = fvi.next();
-			assert(v1 == v2);
-			assert(hm.containsValue(v1) == fm.containsValue(v2));
+		Set<K> hks = hm.keySet();
+		Set<K> fks = hm.keySet();
+		assert(hks.size() == fks.size());
+		for(K k : hks){
+			assert(fks.contains(k));
+			assert(equals(hm.get(k), fm.get(k))): hm.get(k)+" vs "+fm.get(k);
+			assert(hks.contains(k));
 		}
-		assert(hm.toString().equals(fm.toString()));
+		for(K k : fks){
+			assert(fks.contains(k));
+			assert(equals(hm.get(k), fm.get(k))): hm.get(k)+" vs "+fm.get(k);
+			assert(hks.contains(k));
+		}
+		Collection<V> hvc = hm.values();
+		Collection<V> fvc = fm.values();
+		assert(hvc.size() == fvc.size());
+		for(V v: hvc){
+			assert(hm.containsValue(v));
+			assert(fm.containsValue(v));
+		}
+		for(V v: fvc){
+			assert(hm.containsValue(v));
+			assert(fm.containsValue(v));
+		}
 	}
 	
 	private static void testPut(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm, int testCase){
@@ -550,7 +576,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		fm.put(null, 4);
 		hm.put("28", null);
 		fm.put("28", null);
-		methodTest(hm, fm);	
+		testEquality(hm, fm);	
 		for(int i=0; i<aux.size(); i++)
 			assert(aux.get(i).paux == i);
 		assert(aux.size() == fm.size());
@@ -575,7 +601,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 				assert(aux.get(kIndex) == tail);
 			}
 		}
-		methodTest(hm, fm);
+		testEquality(hm, fm);
 		for(int i=0; i<aux.size(); i++)
 			assert(aux.get(i).paux == i);
 		assert(aux.size() == fm.size());
@@ -594,7 +620,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		}
 		hm.putAll(add);
 		fm.putAll(add);
-		methodTest(hm, fm);
+		testEquality(hm, fm);
 		for(int i=0; i<aux.size(); i++)
 			assert(aux.get(i).paux == i);
 		assert(aux.size() == fm.size());
@@ -606,88 +632,80 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		List<FusionBackupHashMap<String, Integer>.Node> aux = fm.aux;
 		hm.clear();
 		fm.clear();
-		methodTest(hm, fm);
+		testEquality(hm, fm);
 		for(int i=0; i<aux.size(); i++)
 			assert(aux.get(i).paux == i);
 		assert(aux.size() == fm.size());
 		System.out.println("pass!");
 	}
 	
+	private static FusionBackupHashMap<String, Integer> testRecover(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm, HashMap<Integer, String> cluster, int id){
+		System.out.println("Testing recovery ...");
+		HashSet<Integer> connections = new HashSet<Integer>();
+		connections.addAll(fm.connection2id.keySet());
+		for(int connection: connections)
+			fm.manager.closeConnection(connection);
+		fm = new FusionBackupHashMap<String, Integer>(cluster, id, new IntegerCoder());
+		testEquality(fm, hm);
+		List<FusionBackupHashMap<String, Integer>.Node> aux = fm.aux;
+		for(int i=0; i<aux.size(); i++)
+			assert(aux.get(i).paux == i);
+		assert(aux.size() == fm.size());
+		System.out.println("pass!");
+		return fm;
+	}
+	
 	/**
 	 * Test
 	 * @param args
 	 */
+	@SuppressWarnings("unchecked")
 	public static void main(String[] args) throws Exception{
-//		HashMap<String, EncodableInteger> hm = new HashMap<String, EncodableInteger>();
-//		FusionBackupHashMap<String, EncodableInteger> fm = new FusionBackupHashMap<String, EncodableInteger>(null, 0);
-//		int testRound = 100;
-//		for(int i=0; i<testRound; i++){
-//			int testType = (int)(Math.random()*4);
-//			switch(testType){
-//				case 0:
-//					testPut(hm ,fm, 5000+(int)(Math.random()*10000));
-//					break;
-//				case 1:
-//					testRemove(hm ,fm, 2000+(int)(Math.random()*5000));
-//					break;
-//				case 2:
-//					testPutAll(hm ,fm, 5000+(int)(Math.random()*10000));
-//					break;
-//				case 3:
-//					testClear(hm, fm);
-//					break;
-//			}
-//		}			
-//		
-//		System.out.println("Pass all tests!");
-		
-		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
+		final HashMap<Integer, String> cluster = new HashMap<Integer, String>();
 		String ip = Inet4Address.getLocalHost().getHostAddress();
 		cluster.put(0, ip+":12345");
 		cluster.put(1, ip+":12346");
 		cluster.put(2, ip+":12347");
 		cluster.put(3, ip+":12348");
 		cluster.put(4, ip+":12349");
-		final FusionBackupHashMap<String, Integer> m0 = new FusionBackupHashMap<String, Integer>(cluster, 0, new IntegerCoder());
-		final FusionBackupHashMap<String, Integer> m1 = new FusionBackupHashMap<String, Integer>(cluster, 1, new IntegerCoder());
-//		new Thread(){
-//			@Override
-//			public void run(){
-//				for(int i=0; i<1000; i++){
-//					String k = "str"+(int)(Math.random()*500);
-//					Integer v = (int)(Math.random()*1000);
-//					m0.put(k, v);
-//				}
-//				for(int i=0; i<1000; i++){
-//					String k = "str"+(int)(Math.random()*500);
-//					m0.remove(k);
-//				}
-//			}
-//		}.start();
-//		new Thread(){
-//			@Override
-//			public void run(){
-//				for(int i=0; i<1000; i++){
-//					String k = "str"+(int)(Math.random()*500);
-//					Integer v = (int)(Math.random()*1000);
-//					m1.put(k, v);
-//				}
-//				for(int i=0; i<1000; i++){
-//					String k = "str"+(int)(Math.random()*500);
-//					m1.remove(k);
-//				}
-//			}
-//		}.start();
-		System.out.println("m0: "+m0);
-		System.out.println("m1 "+m1);
-		for(int i=0; i<100; i++){
-			m0.put(""+i, i);
+		HashMap<String, Integer> hm = new HashMap<String, Integer>();
+		FusionBackupHashMap<String, Integer> fm = new FusionBackupHashMap<String, Integer>(cluster, 1, new IntegerCoder());
+		testPut(hm ,fm, 500+(int)(Math.random()*1000));
+		final int total = 1;
+		final int testRound = 20;
+		for(int n=0; n<total; n++){
+			final int No = n;
+			new Thread(){
+				@Override
+				public void run(){
+					HashMap<String, Integer> hm = new HashMap<String, Integer>();
+					FusionBackupHashMap<String, Integer> fm = new FusionBackupHashMap<String, Integer>(cluster, No, new IntegerCoder());
+					for(int i=0; i<testRound; i++){
+						int testType = (int)(Math.random()*4);
+						switch(testType){
+							case 0:
+								testPut(hm ,fm, 500+(int)(Math.random()*1000));
+								fm = testRecover(hm, fm, cluster, No);
+								break;
+							case 1:
+								testRemove(hm ,fm, 200+(int)(Math.random()*500));
+								fm = testRecover(hm, fm, cluster, No);
+								break;
+							case 2:
+								testPutAll(hm ,fm, 500+(int)(Math.random()*1000));
+								fm = testRecover(hm, fm, cluster, No);
+								break;
+							case 3:
+								testClear(hm, fm);
+								fm = testRecover(hm, fm, cluster, No);
+								break;
+						}
+					}
+					System.out.println("Primary "+No+" pass all tests!");
+				}
+			}.start();
 		}
-		for(int i=100; i<200; i++){
-			m1.put(""+i, i);
-		}
-		m0.put("Josh", 3);
-		m1.put("Jim", 1);
+					
 	}
 
 }

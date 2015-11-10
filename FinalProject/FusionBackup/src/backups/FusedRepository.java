@@ -200,7 +200,7 @@ public class FusedRepository {
 			anode.fusedNode.unlock();
 			endNode.getAuxiliaryNode(primaryId).fusedNode = anode.fusedNode;
 			endNode.lock();
-			endNode.updateData(covertToDataVector(end), covertToDataVector(null), primaryId);
+			endNode.updateData(covertToDataVector(end), new DoubleMatrix(nodeSize), primaryId);
 			endNode.setAuxiliaryNode(null, primaryId);
 			if(endNode.fusedNodeNumber() == 0){
 				assert(dataStack.get(dataStack.size()-1) == endNode);
