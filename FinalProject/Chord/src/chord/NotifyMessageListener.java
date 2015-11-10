@@ -15,7 +15,7 @@ public class NotifyMessageListener implements OnMessageReceivedListener {
 	@Override
 	public void OnMessageReceived(CommunicationManager manager, int id,
 			Message msg) {
-		node.join((ChordNode) msg.get("Reply"));
+		node.notifyPredecessor((ChordNode) msg.get("Reply"));
 		
 		// TODO Auto-generated method stub
 		

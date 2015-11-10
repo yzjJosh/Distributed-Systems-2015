@@ -25,6 +25,8 @@ public class ChordNode implements Serializable {
 	 * 
 	 */
 	private static final long serialVersionUID = 1L;
+	String ip;
+	int port;
 	/**
 	 * The identifier of this node
 	 */
@@ -72,8 +74,8 @@ public class ChordNode implements Serializable {
 		// Add itself to the information sheet.
 
 		// Specify a random port number.
-		int port = (int) (10000 + Math.random() * 10000);
-		String ip = InetAddress.getLocalHost().getHostAddress();
+		port = (int) (10000 + Math.random() * 10000);
+		ip = InetAddress.getLocalHost().getHostAddress();
 		identifier = new ChordID(port + ip);
 		String data = ip + " " + port + " " + identifier.getID() + "\n";
 		System.out.println(data);
@@ -189,10 +191,50 @@ public class ChordNode implements Serializable {
 				successor = node;
 			}
 		}
-		successor.notifyPredecessor(this);
+		;
+		String[] splits = clusterInfo.get(successor.getChordID().getID()).split(" ");
+		String connect_ip = splits[0];
+		int connect_port = Integer.parseInt(splits[1]);
+		// Connect to an exsiting node
+		try {
+			int id_link = manager.connect(connect_ip, connect_port);
+			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
+				
+				@Override
+				public void OnMessageReceived(CommunicationManager manager, int id,
+						Message msg) {
+					
+				}
+				
+				@Override
+				public void OnReceiveError(CommunicationManager manager, int id) {
+					
+					
+				}
+				
+			});
+			
+			manager.sendMessageForResponse(id_link, new Message().put("NotifyPredecessor", "WantToNotify"), new MessageFilter() {
+				
+				@Override
+				public boolean filter(Message msg) {
+					if (msg != null) {
+						if (msg.containsKey("Reply")) {
+							return true;
+						}
+					}
+					return false;
+				}		
+			}, MAX_RESPONSE_TIME,  new NotifyMessageListener(this), false);
+					
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		manager.waitForConnection(port, new ChordNodeListener(this));
+
 	}
 
-	private void notifyPredecessor(ChordNode node) {
+	public void notifyPredecessor(ChordNode node) {
 		ChordID key = node.getChordID();
 		if (predecessor == null
 				|| key.isBetween(predecessor.getChordID(), this.getChordID())) {
@@ -207,7 +249,9 @@ public class ChordNode implements Serializable {
 		for (int i = 0; i < 32; i++) {
 			FingerTableEntry finger = fingerTable.getFinger(i);
 			ChordID key = finger.getStart();
-			finger.setNode(find_successor(key));
+			ChordNode node = find_successor(key);
+			finger.setNode(node);
+			finger.setInterval(key, node.getChordID());
 		}
 	}
 
@@ -227,6 +271,16 @@ public class ChordNode implements Serializable {
 		ChordNode node = new ChordNode();
 	    try {
 			node.initConnection(args[0]);
+			//stablize
+			ChordNode preceding = node.getSuccessor().getPredecessor();
+			node.stabilize();
+			if (preceding == null) {
+				node.getSuccessor().stabilize();
+			} else {
+				preceding.stabilize();
+			}
+			//fix fingertable
+			node.fixFingers();
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {
