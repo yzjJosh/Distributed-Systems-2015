@@ -43,7 +43,7 @@ public class ChordNode implements Serializable {
 	 * A reference to this node's predecessor.
 	 */
 	protected ChordNode predecessor = null;
-
+	protected HashMap <Integer, Integer>listOfLinks = new HashMap<Integer, Integer>(); // The list of the ids of links.
 	private static final int MAX_RESPONSE_TIME = 5000; // The maximum response time of this system.
 	private static final HashMap<Integer, String> clusterInfo = new HashMap<Integer, String>(); // information about other node.
 	private static final ArrayList<Integer> ids = new ArrayList<Integer>(); 
@@ -91,23 +91,32 @@ public class ChordNode implements Serializable {
 			int connect_port = Integer.parseInt(splits[1]);
 			// Connect to an exsiting node
 			int id_link = manager.connect(connect_ip, connect_port);
+			listOfLinks.put(ids.get(index), id_link); //Bind the chord id with a link num 
 			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
 				
 				@Override
 				public void OnMessageReceived(CommunicationManager manager, int id,
 						Message msg) {
+					if (msg.containsKey("MessageType" )){
+						if(msg.get("MessageType").equals("NotifyPredecessor")) {
+							try {
+								manager.sendMessage(id, new Message().put("Reply", ChordNode.this));
+							} catch (IOException e) {
+								System.err.println("Reply notify predecessor error!");
+							}
+						}
+					}
 					
 				}
 				
 				@Override
 				public void OnReceiveError(CommunicationManager manager, int id) {
-					
-					
+					System.err.println("Received error!");
 				}
 				
 			});
 			try {
-				manager.sendMessageForResponse(id_link, new Message().put("RequestJoin", "WantToJoin"), new MessageFilter() {
+				manager.sendMessageForResponse(id_link, new Message().put("MessageType", "Join"), new MessageFilter() {
 					
 					@Override
 					public boolean filter(Message msg) {
@@ -126,7 +135,7 @@ public class ChordNode implements Serializable {
 		manager.waitForConnection(port, new ChordNodeListener(this));
 
 	}
-
+	
 	/**
 	 * Find the successor node for the given identifier. The successor node is
 	 * the node responsible for storing any <key, value> pair whose key hashes
@@ -191,30 +200,11 @@ public class ChordNode implements Serializable {
 				successor = node;
 			}
 		}
-		;
-		String[] splits = clusterInfo.get(successor.getChordID().getID()).split(" ");
-		String connect_ip = splits[0];
-		int connect_port = Integer.parseInt(splits[1]);
-		// Connect to an exsiting node
-		try {
-			int id_link = manager.connect(connect_ip, connect_port);
-			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
-				
-				@Override
-				public void OnMessageReceived(CommunicationManager manager, int id,
-						Message msg) {
-					
-				}
-				
-				@Override
-				public void OnReceiveError(CommunicationManager manager, int id) {
-					
-					
-				}
-				
-			});
-			
-			manager.sendMessageForResponse(id_link, new Message().put("NotifyPredecessor", "WantToNotify"), new MessageFilter() {
+		//If the link has been set up.
+		int successorID = successor.getChordID().getID();
+		if (listOfLinks.containsKey(successorID) ) {
+			try{
+			manager.sendMessageForResponse(listOfLinks.get(successorID), new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
 				
 				@Override
 				public boolean filter(Message msg) {
@@ -230,7 +220,56 @@ public class ChordNode implements Serializable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		manager.waitForConnection(port, new ChordNodeListener(this));
+		}
+		String[] splits = clusterInfo.get(successorID).split(" ");
+		String connect_ip = splits[0];
+		int connect_port = Integer.parseInt(splits[1]);
+		
+		// Connect to an exsiting node
+		try {
+			int id_link = manager.connect(connect_ip, connect_port);
+			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
+				
+				@Override
+				public void OnMessageReceived(CommunicationManager manager, int id,
+						Message msg) {
+					if (msg.containsKey("MessageType" )){
+						if(msg.get("MessageType").equals("NotifyPredecessor")) {
+							try {
+								manager.sendMessage(id, new Message().put("Reply", ChordNode.this));
+							} catch (IOException e) {
+								System.err.println("Reply notify predecessor error!");
+							}
+						}
+					}
+					
+				}
+				
+				@Override
+				public void OnReceiveError(CommunicationManager manager, int id) {
+					System.err.println("Received error!");
+					
+				}
+				
+			});
+			
+			manager.sendMessageForResponse(id_link, new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
+				
+				@Override
+				public boolean filter(Message msg) {
+					if (msg != null) {
+						if (msg.containsKey("Reply")) {
+							return true;
+						}
+					}
+					return false;
+				}		
+			}, MAX_RESPONSE_TIME,  new NotifyMessageListener(this), false);
+					
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	
 
 	}
 
