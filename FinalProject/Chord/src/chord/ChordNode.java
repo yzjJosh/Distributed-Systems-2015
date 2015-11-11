@@ -42,17 +42,19 @@ public class ChordNode implements Serializable {
 	/**
 	 * A reference to this node's predecessor.
 	 */
+	
 	protected ChordNode predecessor = null;
 	protected HashMap <Integer, Integer>listOfLinks = new HashMap<Integer, Integer>(); // The list of the ids of links.
 	private static final int MAX_RESPONSE_TIME = 5000; // The maximum response time of this system.
 	private static final HashMap<Integer, String> clusterInfo = new HashMap<Integer, String>(); // information about other node.
-	private static final ArrayList<Integer> ids = new ArrayList<Integer>(); 
-															
+	private static final ArrayList<Integer> ids = new ArrayList<Integer>();
+	private static HashMap<Serializable, Serializable> data = new HashMap<Serializable, Serializable>(); //The data stored in the chord node.
+	
 	protected transient List<Socket> socket = new LinkedList<Socket>();
 	protected static transient CommunicationManager manager = new CommunicationManager();
 
 	public void initConnection(String path) throws IOException, FileNotFoundException {
-
+		
 		String serverInfo;
 		BufferedReader reader = new BufferedReader(new FileReader(
 				new File(path)));
@@ -116,7 +118,7 @@ public class ChordNode implements Serializable {
 				
 			});
 			try {
-				manager.sendMessageForResponse(id_link, new Message().put("MessageType", "Join"), new MessageFilter() {
+				manager.sendMessageForResponse(id_link, new Message().put("MessageType", "RequestJoin"), new MessageFilter() {
 					
 					@Override
 					public boolean filter(Message msg) {
@@ -200,9 +202,9 @@ public class ChordNode implements Serializable {
 				successor = node;
 			}
 		}
-		//If the link has been set up.
 		int successorID = successor.getChordID().getID();
 		if (clusterInfo.containsKey(successorID)) {
+			//If the link has been set up.
 		if (listOfLinks.containsKey(successorID) ) {
 			try{
 			manager.sendMessageForResponse(listOfLinks.get(successorID), new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
@@ -229,30 +231,7 @@ public class ChordNode implements Serializable {
 		// Connect to an exsiting node
 		try {
 			int id_link = manager.connect(connect_ip, connect_port);
-			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
-				
-				@Override
-				public void OnMessageReceived(CommunicationManager manager, int id,
-						Message msg) {
-					if (msg.containsKey("MessageType" )){
-						if(msg.get("MessageType").equals("NotifyPredecessor")) {
-							try {
-								manager.sendMessage(id, new Message().put("Reply", ChordNode.this));
-							} catch (IOException e) {
-								System.err.println("Reply notify predecessor error!");
-							}
-						}
-					}
-					
-				}
-				
-				@Override
-				public void OnReceiveError(CommunicationManager manager, int id) {
-					System.err.println("Received error!");
-					
-				}
-				
-			});
+			manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(this));
 			
 			manager.sendMessageForResponse(id_link, new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
 				
@@ -296,7 +275,172 @@ public class ChordNode implements Serializable {
 			finger.setInterval(key, node.getChordID());
 		}
 	}
+	public boolean storeData(Serializable key, Serializable value) {
+		ChordID transformKey  = new ChordID((String) key);
+		if(transformKey.equals(this.identifier)) {
+			data.put(key, value);
+			return true;
+		} else {
+			int successorID = successor.getChordID().getID();
+			final LinkedList<Boolean> result = new LinkedList<Boolean>();
+			if (clusterInfo.containsKey(successorID)) {
+				//If the link has been set up.
+			if (listOfLinks.containsKey(successorID) ) {
+				try{
+				manager.sendMessageForResponse(listOfLinks.get(successorID), new Message().put("MessageType", "StoreData").put("Key", key).put("Value", value), new MessageFilter() {
+					
+					@Override
+					public boolean filter(Message msg) {
+						if (msg != null) {
+							if (msg.containsKey("StoreSuccess")) {
+								return true;
+							}
+						}
+						return false;
+					}		
+				}, MAX_RESPONSE_TIME,  new OnMessageReceivedListener() {
 
+					@Override
+					public void OnMessageReceived(CommunicationManager manager,
+							int id, Message msg) {
+						System.out.println("Store reqeust has been sent to the next node!" );		
+						result.add(true);
+					}
+
+					@Override
+					public void OnReceiveError(CommunicationManager manager,
+							int id) {
+						System.err.println("On reveived error in the storedata function!");				
+						result.add(false);
+					}
+					
+				}, true);
+						
+				} catch (IOException e) {
+					e.printStackTrace();
+					result.add(false);
+				}
+				
+				if(result.peek()){
+					return true;
+				}else{
+					return false;
+				}
+				
+			} else {
+				String[] splits = clusterInfo.get(successorID).split(" ");
+				String connect_ip = splits[0];
+				int connect_port = Integer.parseInt(splits[1]);
+					
+				try{
+						int id_link = manager.connect(connect_ip, connect_port);
+						manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(ChordNode.this));
+						manager.sendMessageForResponse(listOfLinks.get(successorID), new Message().put("MessageType", "StoreData").put("Key", key).put("Value", value), new MessageFilter() {
+							
+							@Override
+							public boolean filter(Message msg) {
+								if (msg != null) {
+									if (msg.containsKey("StoreSuccess")) {
+										return true;
+									}
+								}
+								return false;
+							}		
+						}, MAX_RESPONSE_TIME,  new OnMessageReceivedListener() {
+
+							@Override
+							public void OnMessageReceived(CommunicationManager manager,
+									int id, Message msg) {
+								System.out.println("Store reqeust has been sent to the next node!" );		
+								result.add(true);
+							}
+
+							@Override
+							public void OnReceiveError(CommunicationManager manager,
+									int id) {
+								System.err.println("On reveived error in the storedata function!");				
+								result.add(false);
+							}
+							
+						}, true);
+								
+						} catch (IOException e) {
+							e.printStackTrace();
+							result.add(false);
+						}					
+						if(result.peek()){
+							return true;
+						}else{
+							return false;
+						}	
+				}
+			}
+		}
+	}
+	
+	
+	//Look up the key and return the value.
+	public Serializable getValue(Serializable key) {
+		if (data.containsKey(key)) {
+			return data.get(key);
+		} else {
+			//Look up the next node in the finger table.
+			for(int i = 0; i < 32; i++) {
+				FingerTableEntry entry = fingerTable.getFinger(i);
+				
+			}
+			int successorID = successor.getChordID().getID();
+			if (clusterInfo.containsKey(successorID)) {
+				//If the link has been set up.
+			if (listOfLinks.containsKey(successorID) ) {
+				try{
+				manager.sendMessageForResponse(listOfLinks.get(successorID), new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
+					
+					@Override
+					public boolean filter(Message msg) {
+						if (msg != null) {
+							if (msg.containsKey("Reply")) {
+								return true;
+							}
+						}
+						return false;
+					}		
+				}, MAX_RESPONSE_TIME,  new NotifyMessageListener(this), false);
+						
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+				String[] splits = clusterInfo.get(successorID).split(" ");
+				String connect_ip = splits[0];
+				int connect_port = Integer.parseInt(splits[1]);
+			
+			// Connect to an exsiting node
+			try {
+				int id_link = manager.connect(connect_ip, connect_port);
+				manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(ChordNode.this));
+				
+				manager.sendMessageForResponse(id_link, new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
+					
+					@Override
+					public boolean filter(Message msg) {
+						if (msg != null) {
+							if (msg.containsKey("Reply")) {
+								return true;
+							}
+						}
+						return false;
+					}		
+				}, MAX_RESPONSE_TIME,  new NotifyMessageListener(this), false);
+						
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			}
+		}
+		
+		
+	}
 	public ChordID getChordID() {
 		return identifier;
 	}
