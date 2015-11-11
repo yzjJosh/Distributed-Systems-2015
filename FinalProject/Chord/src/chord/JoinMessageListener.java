@@ -17,7 +17,6 @@ public class JoinMessageListener implements OnMessageReceivedListener {
 			Message msg) {
 		node.join((ChordNode) msg.get("Reply"));
 		
-		// TODO Auto-generated method stub
 		
 	}
 

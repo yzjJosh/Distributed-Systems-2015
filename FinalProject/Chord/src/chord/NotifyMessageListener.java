@@ -17,7 +17,6 @@ public class NotifyMessageListener implements OnMessageReceivedListener {
 			Message msg) {
 		node.notifyPredecessor((ChordNode) msg.get("Reply"));
 		
-		// TODO Auto-generated method stub
 		
 	}
 

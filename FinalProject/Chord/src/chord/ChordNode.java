@@ -34,7 +34,7 @@ public class ChordNode implements Serializable {
 	/**
 	 * The node's finger table.
 	 */
-	protected FingerTable fingerTable = new FingerTable(this);
+	protected FingerTable fingerTable;
 	/**
 	 * A reference to this node's successor.
 	 */
@@ -81,7 +81,7 @@ public class ChordNode implements Serializable {
 		System.out.println(data);
 		writer.write(data);
 		writer.close();
-		
+		 fingerTable = new FingerTable(this);
 	    
 		int num = clusterInfo.size();
 		if (num > 0) {
@@ -202,6 +202,7 @@ public class ChordNode implements Serializable {
 		}
 		//If the link has been set up.
 		int successorID = successor.getChordID().getID();
+		if (clusterInfo.containsKey(successorID)) {
 		if (listOfLinks.containsKey(successorID) ) {
 			try{
 			manager.sendMessageForResponse(listOfLinks.get(successorID), new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
@@ -217,13 +218,13 @@ public class ChordNode implements Serializable {
 				}		
 			}, MAX_RESPONSE_TIME,  new NotifyMessageListener(this), false);
 					
-		} catch (IOException e) {
-			e.printStackTrace();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
-		}
-		String[] splits = clusterInfo.get(successorID).split(" ");
-		String connect_ip = splits[0];
-		int connect_port = Integer.parseInt(splits[1]);
+			String[] splits = clusterInfo.get(successorID).split(" ");
+			String connect_ip = splits[0];
+			int connect_port = Integer.parseInt(splits[1]);
 		
 		// Connect to an exsiting node
 		try {
@@ -269,6 +270,7 @@ public class ChordNode implements Serializable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+		}
 	
 
 	}
@@ -288,6 +290,7 @@ public class ChordNode implements Serializable {
 		for (int i = 0; i < 32; i++) {
 			FingerTableEntry finger = fingerTable.getFinger(i);
 			ChordID key = finger.getStart();
+			System.out.println(key.getID());
 			ChordNode node = find_successor(key);
 			finger.setNode(node);
 			finger.setInterval(key, node.getChordID());
