@@ -22,7 +22,7 @@ public class ChordNodeListener implements OnConnectionListener {
 
 				@Override
 				public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-					if (msg.containsKey("RequestJoin")) {
+					if (msg.get("MessageType").equals("RequestJoin")) {
 						try {
 							manager.sendMessage(id, new Message().put("Reply", node));
 						} catch (IOException e) {

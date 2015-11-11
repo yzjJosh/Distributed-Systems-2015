@@ -25,6 +25,8 @@ public class ChordNode implements Serializable {
 	 * 
 	 */
 	private static final long serialVersionUID = 1L;
+	String ip;
+	int port;
 	/**
 	 * The identifier of this node
 	 */
@@ -32,7 +34,7 @@ public class ChordNode implements Serializable {
 	/**
 	 * The node's finger table.
 	 */
-	protected FingerTable fingerTable = new FingerTable(this);
+	protected FingerTable fingerTable;
 	/**
 	 * A reference to this node's successor.
 	 */
@@ -41,7 +43,7 @@ public class ChordNode implements Serializable {
 	 * A reference to this node's predecessor.
 	 */
 	protected ChordNode predecessor = null;
-
+	protected HashMap <Integer, Integer>listOfLinks = new HashMap<Integer, Integer>(); // The list of the ids of links.
 	private static final int MAX_RESPONSE_TIME = 5000; // The maximum response time of this system.
 	private static final HashMap<Integer, String> clusterInfo = new HashMap<Integer, String>(); // information about other node.
 	private static final ArrayList<Integer> ids = new ArrayList<Integer>(); 
@@ -72,14 +74,14 @@ public class ChordNode implements Serializable {
 		// Add itself to the information sheet.
 
 		// Specify a random port number.
-		int port = (int) (10000 + Math.random() * 10000);
-		String ip = InetAddress.getLocalHost().getHostAddress();
+		port = (int) (10000 + Math.random() * 10000);
+		ip = InetAddress.getLocalHost().getHostAddress();
 		identifier = new ChordID(port + ip);
 		String data = ip + " " + port + " " + identifier.getID() + "\n";
 		System.out.println(data);
 		writer.write(data);
 		writer.close();
-		
+		 fingerTable = new FingerTable(this);
 	    
 		int num = clusterInfo.size();
 		if (num > 0) {
@@ -89,23 +91,32 @@ public class ChordNode implements Serializable {
 			int connect_port = Integer.parseInt(splits[1]);
 			// Connect to an exsiting node
 			int id_link = manager.connect(connect_ip, connect_port);
+			listOfLinks.put(ids.get(index), id_link); //Bind the chord id with a link num 
 			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
 				
 				@Override
 				public void OnMessageReceived(CommunicationManager manager, int id,
 						Message msg) {
+					if (msg.containsKey("MessageType" )){
+						if(msg.get("MessageType").equals("NotifyPredecessor")) {
+							try {
+								manager.sendMessage(id, new Message().put("Reply", ChordNode.this));
+							} catch (IOException e) {
+								System.err.println("Reply notify predecessor error!");
+							}
+						}
+					}
 					
 				}
 				
 				@Override
 				public void OnReceiveError(CommunicationManager manager, int id) {
-					
-					
+					System.err.println("Received error!");
 				}
 				
 			});
 			try {
-				manager.sendMessageForResponse(id_link, new Message().put("RequestJoin", "WantToJoin"), new MessageFilter() {
+				manager.sendMessageForResponse(id_link, new Message().put("MessageType", "Join"), new MessageFilter() {
 					
 					@Override
 					public boolean filter(Message msg) {
@@ -124,7 +135,7 @@ public class ChordNode implements Serializable {
 		manager.waitForConnection(port, new ChordNodeListener(this));
 
 	}
-
+	
 	/**
 	 * Find the successor node for the given identifier. The successor node is
 	 * the node responsible for storing any <key, value> pair whose key hashes
@@ -189,10 +200,82 @@ public class ChordNode implements Serializable {
 				successor = node;
 			}
 		}
-		successor.notifyPredecessor(this);
+		//If the link has been set up.
+		int successorID = successor.getChordID().getID();
+		if (clusterInfo.containsKey(successorID)) {
+		if (listOfLinks.containsKey(successorID) ) {
+			try{
+			manager.sendMessageForResponse(listOfLinks.get(successorID), new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
+				
+				@Override
+				public boolean filter(Message msg) {
+					if (msg != null) {
+						if (msg.containsKey("Reply")) {
+							return true;
+						}
+					}
+					return false;
+				}		
+			}, MAX_RESPONSE_TIME,  new NotifyMessageListener(this), false);
+					
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
+			String[] splits = clusterInfo.get(successorID).split(" ");
+			String connect_ip = splits[0];
+			int connect_port = Integer.parseInt(splits[1]);
+		
+		// Connect to an exsiting node
+		try {
+			int id_link = manager.connect(connect_ip, connect_port);
+			manager.setOnMessageReceivedListener(id_link, new OnMessageReceivedListener() {
+				
+				@Override
+				public void OnMessageReceived(CommunicationManager manager, int id,
+						Message msg) {
+					if (msg.containsKey("MessageType" )){
+						if(msg.get("MessageType").equals("NotifyPredecessor")) {
+							try {
+								manager.sendMessage(id, new Message().put("Reply", ChordNode.this));
+							} catch (IOException e) {
+								System.err.println("Reply notify predecessor error!");
+							}
+						}
+					}
+					
+				}
+				
+				@Override
+				public void OnReceiveError(CommunicationManager manager, int id) {
+					System.err.println("Received error!");
+					
+				}
+				
+			});
+			
+			manager.sendMessageForResponse(id_link, new Message().put("MessageType", "NotifyPredecessor"), new MessageFilter() {
+				
+				@Override
+				public boolean filter(Message msg) {
+					if (msg != null) {
+						if (msg.containsKey("Reply")) {
+							return true;
+						}
+					}
+					return false;
+				}		
+			}, MAX_RESPONSE_TIME,  new NotifyMessageListener(this), false);
+					
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		}
+	
+
 	}
 
-	private void notifyPredecessor(ChordNode node) {
+	public void notifyPredecessor(ChordNode node) {
 		ChordID key = node.getChordID();
 		if (predecessor == null
 				|| key.isBetween(predecessor.getChordID(), this.getChordID())) {
@@ -207,7 +290,10 @@ public class ChordNode implements Serializable {
 		for (int i = 0; i < 32; i++) {
 			FingerTableEntry finger = fingerTable.getFinger(i);
 			ChordID key = finger.getStart();
-			finger.setNode(find_successor(key));
+			System.out.println(key.getID());
+			ChordNode node = find_successor(key);
+			finger.setNode(node);
+			finger.setInterval(key, node.getChordID());
 		}
 	}
 
@@ -227,6 +313,16 @@ public class ChordNode implements Serializable {
 		ChordNode node = new ChordNode();
 	    try {
 			node.initConnection(args[0]);
+			//stablize
+			ChordNode preceding = node.getSuccessor().getPredecessor();
+			node.stabilize();
+			if (preceding == null) {
+				node.getSuccessor().stabilize();
+			} else {
+				preceding.stabilize();
+			}
+			//fix fingertable
+			node.fixFingers();
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {

@@ -33,7 +33,10 @@ class FingerTableEntry implements Serializable {
 		this.start = start;
 	}
 
-
+	public void setInterval(ChordID start, ChordID end) {
+		this.interval[0] = start;
+		this.interval[1] = end;
+	}
 	public void setNode(ChordNode node) {
 		this.node = node;
 	}
