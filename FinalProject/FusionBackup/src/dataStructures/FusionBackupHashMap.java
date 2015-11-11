@@ -35,6 +35,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	private final Object mapLock = new Object();
 	private final Object updateLock = new Object();
 	private final Coder<V> coder;
+	private final PauseThread pauseThread = new PauseThread();
 	
 	/**
 	 * Construct a fusion-backup hashmap with several specified remote backup nodes. If there is available backup, restore
@@ -55,6 +56,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		this.manager = new CommunicationManager();
 		this.id2connection = new HashMap<Integer, Integer>();
 		this.connection2id = new HashMap<Integer, Integer>();
+		this.pauseThread.start();
 		if(hosts == null)
 			return;
 		LinkedList<Semaphore> semaphores = new LinkedList<Semaphore>();
@@ -83,7 +85,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 										return msg != null && msg.containsKey("MessageType")
 												&& msg.get("MessageType") == MessageType.CONNECT_ACCEPTED;
 									}
-								}, 5000, new OnMessageReceivedListener() {
+								}, 10000, new OnMessageReceivedListener() {
 									@Override
 									public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
 										synchronized (mapLock) {
@@ -131,7 +133,16 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		if(containsKey(key) && equals(value, get(key)))
 			return value;
 		synchronized(updateLock){
-			V prev = putWithoutBackup(key, value);
+			Node node = null;
+			if(map.containsKey(key)){
+				node = map.get(key);		
+			}else{
+				node = new Node(aux.size(), null);
+				map.put(key, node);
+				aux.add(node);
+			}
+			V prev = node.val;
+			node.val = value;
 			ArrayList<Double> prevlist = coder.encode(prev);
 			ArrayList<Double> curlist = coder.encode(value);
 			Message msg = new Message().put("MessageType", MessageType.BACKUP_UPDATE).
@@ -154,19 +165,6 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		}
 	}
 	
-	private V putWithoutBackup(K key, V value){
-		Node node = null;
-		if(map.containsKey(key)){
-			node = map.get(key);		
-		}else{
-			node = new Node(aux.size(), null);
-			map.put(key, node);
-			aux.add(node);
-		}
-		V ret = node.val;
-		node.val = value;
-		return ret;
-	}
 
 	/**
 	 * Remove a key-value from the map, and update the backup data at the same time
@@ -176,7 +174,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		if(!containsKey(key)) return null;
 		synchronized(updateLock){
 			Node node = map.remove(key);
-			if(node == null) return null;
+			assert(node != null);
 			Node tail = aux.get(aux.size()-1);
 			aux.set(node.paux, tail);
 			tail.paux = node.paux;
@@ -280,48 +278,57 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	
 	
 	private void recover() throws RecoverFailureException {
-		int connection = -1;
+		HashSet<Integer> connections = new HashSet<Integer>();
 		synchronized(mapLock){
 			if(connection2id.isEmpty())
 				throw new RecoverFailureException("No available backup node!");
-			connection = connection2id.keySet().iterator().next();
+			connections.addAll(connection2id.keySet());
 		}
-		final HashMap<String, Boolean> result = new HashMap<String, Boolean>();
-		try {
-			manager.sendMessageForResponse(connection, 
-					new Message().put("MessageType", MessageType.RECOVER_REQUEST), 
-					new MessageFilter(){
-						@Override
-						public boolean filter(Message msg) {
-							return msg != null && msg.containsKey("MessageType")
-									&& msg.get("MessageType") == MessageType.RECOVER_RESULT;
-						}
-					}, 10000,
-					new OnMessageReceivedListener(){		
-						@SuppressWarnings("unchecked")
-						@Override
-						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-							if(!(Boolean)msg.get("success")){
-								result.put("success", false);
-								return;
+		for(final int connection: connections){
+			final HashMap<String, Object> result = new HashMap<String, Object>();
+			try {
+				manager.sendMessageForResponse(connection, 
+						new Message().put("MessageType", MessageType.RECOVER_REQUEST), 
+						new MessageFilter(){
+							@Override
+							public boolean filter(Message msg) {
+								return msg != null && msg.containsKey("MessageType")
+										&& msg.get("MessageType") == MessageType.RECOVER_RESULT;
 							}
-							LinkedList<DataEntry<Serializable, ArrayList<Double>>> recover = 
-									(LinkedList<DataEntry<Serializable, ArrayList<Double>>>) msg.get("result");
-							assert(recover != null);
-							for(DataEntry<Serializable, ArrayList<Double>> entry : recover)
-								putWithoutBackup((K)entry.key, coder.decode(entry.value));
-							result.put("success", true);
-						}
-						@Override
-						public void OnReceiveError(CommunicationManager manager, int id) {
-							result.put("success", false);
-						}
-					}, true);
-		} catch (IOException e) {
-			throw new RecoverFailureException("Unable to send RECOVER_REQUEST to repository!");
+						}, 20000,
+						new OnMessageReceivedListener(){		
+							@SuppressWarnings("unchecked")
+							@Override
+							public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+								if(!(Boolean)msg.get("success")){
+									result.put("success", false);
+									result.put("reason", msg.get("reason"));
+									return;
+								}
+								ArrayList<DataEntry<Serializable, ArrayList<Double>>> recover = 
+										(ArrayList<DataEntry<Serializable, ArrayList<Double>>>) msg.get("result");
+								assert(recover != null);
+								for(int i=0; i<recover.size(); i++){
+									DataEntry<Serializable, ArrayList<Double>> entry = recover.get(i);
+									Node n = new Node(i, coder.decode(entry.value));
+									map.put((K)entry.key, n);
+									aux.add(n);
+								}
+								result.put("success", true);
+							}
+							@Override
+							public void OnReceiveError(CommunicationManager manager, int id) {
+								result.put("success", false);
+								result.put("reason", "OnReceiveError");
+							}
+						}, true);
+			} catch (IOException e) {
+				throw new RecoverFailureException("Unable to send RECOVER_REQUEST to repository!");
+			}
+			if((Boolean)result.get("success"))
+				return;
 		}
-		if(!(Boolean)result.get("success"))
-			throw new RecoverFailureException("Recover fails!");
+		throw new RecoverFailureException("Recover fails !");
 	}
 	
 	@Override
@@ -402,8 +409,8 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	
 
 		@Override
-		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-			assert(msg.containsKey("MessageType"));
+		public void OnMessageReceived(final CommunicationManager manager, final int id, Message msg) {
+			if(!msg.containsKey("MessageType")) return;
 			int nodeId = -1;
 			synchronized(mapLock){
 				nodeId = connection2id.get(id);
@@ -411,44 +418,74 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 			try {
 				switch((MessageType)msg.get("MessageType")){
 					case PAUSE_UPDATE:
-						final Semaphore s = new Semaphore(0);
-						final boolean[] lock = new boolean[1];
-						lock[0] = true;
-						final Thread pauseThread = new Thread(){
+						pauseThread.pauseUpdate();
+						new Thread(){
 							@Override
 							public void run(){
-								synchronized(updateLock){
-									s.release();
-									while(lock[0])
-										try {
-											Thread.sleep(1000);
-										} catch (InterruptedException e) {}
+								HashSet<Integer> connections = new HashSet<Integer>();
+								synchronized(connection2id){
+									connections.addAll(connection2id.keySet());
+								}
+								LinkedList<Semaphore> semaphores = new LinkedList<Semaphore>();
+								for(int connection: connections){
+									final Semaphore s = new Semaphore(0);
+									semaphores.add(s);
+									try {
+										manager.sendMessageForResponse(connection, new Message().put("MessageType", MessageType.SIGNAL),
+																	   new MessageFilter(){
+																		@Override
+																		public boolean filter(Message msg) {
+																			return msg!=null && msg.containsKey("MessageType")
+																					&& msg.get("MessageType") == MessageType.SIGNAL_ACK;
+																			}
+																		}, 5000, 
+																		new OnMessageReceivedListener(){
+																			@Override
+																			public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+																				s.release();
+																			}
+																			@Override
+																			public void OnReceiveError(CommunicationManager manager, int id) {
+																				s.release();
+																			}
+																		}, false);
+									} catch (IOException e) {
+										s.release();
+									}
+								}
+								for(Semaphore semaphore: semaphores)
+									try {
+										semaphore.acquire();
+									} catch (InterruptedException e) {
+										e.printStackTrace();
+										System.err.println("Caught unexpected interruption!");
+									}
+								try {
+									manager.sendMessageForResponse(id, new Message().put("MessageType", MessageType.UPDATE_PAUSED), 
+											   new MessageFilter(){
+												@Override
+												public boolean filter(Message msg) {
+													return msg != null && msg.containsKey("MessageType")
+															&& msg.get("MessageType") == MessageType.RESUME_UPDATE;
+												}
+												}, 20000, 
+												new OnMessageReceivedListener(){
+													@Override
+													public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+														pauseThread.resumeUpdate();		
+													}
+													@Override
+													public void OnReceiveError(CommunicationManager manager, int id) {
+														System.err.println("Unable to receive RESUME_UPDATE!");
+														pauseThread.resumeUpdate();
+													}
+												}, false);
+								} catch (IOException e) {
+									System.err.println("Unable to send UPDATE_PAUSED!");
+									pauseThread.resumeUpdate();
 								}
 							}
-						};
-						pauseThread.start();
-						s.acquire();
-						manager.sendMessageForResponse(id, new Message().put("MessageType", MessageType.UPDATE_PAUSED), 
-													   new MessageFilter(){
-														@Override
-														public boolean filter(Message msg) {
-															return msg != null && msg.containsKey("MessageType")
-																	&& msg.get("MessageType") == MessageType.RESUME_UPDATE;
-														}
-														}, 20000, 
-														new OnMessageReceivedListener(){
-															@Override
-															public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-																lock[0] = false;
-																pauseThread.interrupt();		
-															}
-															@Override
-															public void OnReceiveError(CommunicationManager manager, int id) {
-																System.err.println("Unable to receive RESUME_UPDATE!");
-																lock[0] = false;
-																pauseThread.interrupt();
-															}
-														}, false);
+						}.start();	
 						break;
 					case DATA_REQUEST:
 						ArrayList<ArrayList<Double>> data = new ArrayList<ArrayList<Double>>();
@@ -483,6 +520,62 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 			}
 		}
 		
+	}
+	
+	private class PauseThread extends Thread{
+		
+		private int pauseNum = 0;
+		private Object pauseNumLock = new Object();
+		private Object isPausedLock = new Object();
+		private boolean isPaused = false;
+		
+		public void pauseUpdate(){
+			synchronized(pauseNumLock){
+				pauseNum ++;
+				pauseNumLock.notifyAll();
+			}
+			synchronized(isPausedLock){
+				while(!isPaused)
+					try {
+						isPausedLock.wait();
+					} catch (InterruptedException e) {}
+			}
+		}
+		
+		public void resumeUpdate(){
+			synchronized(pauseNumLock){
+				pauseNum --;
+				pauseNumLock.notifyAll();
+			}
+		}
+		
+		@Override
+		public void run(){
+			while(true){
+				synchronized(pauseNumLock){
+					while(pauseNum <= 0)
+						try {
+							pauseNumLock.wait();
+						} catch (InterruptedException e) {}
+				}
+				synchronized(updateLock){
+					synchronized(isPausedLock){
+						isPaused = true;
+						isPausedLock.notifyAll();
+					}
+					synchronized(pauseNumLock){
+						while(pauseNum > 0)
+							try {
+								pauseNumLock.wait();
+							} catch (InterruptedException e) {}
+					}
+				}
+				synchronized(isPausedLock){
+					isPaused = false;
+					isPausedLock.notifyAll();
+				}
+			}
+		}
 	}
 	
 	//--------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -645,8 +738,13 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		connections.addAll(fm.connection2id.keySet());
 		for(int connection: connections)
 			fm.manager.closeConnection(connection);
+		try {
+			Thread.sleep(500);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
 		fm = new FusionBackupHashMap<String, Integer>(cluster, id, new IntegerCoder());
-		testEquality(fm, hm);
+		testEquality(hm, fm);
 		List<FusionBackupHashMap<String, Integer>.Node> aux = fm.aux;
 		for(int i=0; i<aux.size(); i++)
 			assert(aux.get(i).paux == i);
@@ -659,7 +757,6 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	 * Test
 	 * @param args
 	 */
-	@SuppressWarnings("unchecked")
 	public static void main(String[] args) throws Exception{
 		final HashMap<Integer, String> cluster = new HashMap<Integer, String>();
 		String ip = Inet4Address.getLocalHost().getHostAddress();
@@ -668,16 +765,17 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		cluster.put(2, ip+":12347");
 		cluster.put(3, ip+":12348");
 		cluster.put(4, ip+":12349");
-		HashMap<String, Integer> hm = new HashMap<String, Integer>();
-		FusionBackupHashMap<String, Integer> fm = new FusionBackupHashMap<String, Integer>(cluster, 1, new IntegerCoder());
-		testPut(hm ,fm, 500+(int)(Math.random()*1000));
-		final int total = 1;
+		final int maxFault = 4;
+		final int total = 4;
 		final int testRound = 20;
+		final Semaphore falutSemaphore = new Semaphore(maxFault);
+		final Semaphore terminateSemaphore = new Semaphore(1-total);
 		for(int n=0; n<total; n++){
 			final int No = n;
 			new Thread(){
 				@Override
 				public void run(){
+					try{
 					HashMap<String, Integer> hm = new HashMap<String, Integer>();
 					FusionBackupHashMap<String, Integer> fm = new FusionBackupHashMap<String, Integer>(cluster, No, new IntegerCoder());
 					for(int i=0; i<testRound; i++){
@@ -685,27 +783,40 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 						switch(testType){
 							case 0:
 								testPut(hm ,fm, 500+(int)(Math.random()*1000));
+								falutSemaphore.acquire();
 								fm = testRecover(hm, fm, cluster, No);
+								falutSemaphore.release();
 								break;
 							case 1:
 								testRemove(hm ,fm, 200+(int)(Math.random()*500));
+								falutSemaphore.acquire();
 								fm = testRecover(hm, fm, cluster, No);
+								falutSemaphore.release();
 								break;
 							case 2:
 								testPutAll(hm ,fm, 500+(int)(Math.random()*1000));
+								falutSemaphore.acquire();
 								fm = testRecover(hm, fm, cluster, No);
+								falutSemaphore.release();
 								break;
 							case 3:
 								testClear(hm, fm);
+								falutSemaphore.acquire();
 								fm = testRecover(hm, fm, cluster, No);
+								falutSemaphore.release();
 								break;
 						}
 					}
 					System.out.println("Primary "+No+" pass all tests!");
+					terminateSemaphore.release();
+					}catch(Exception e){
+						e.printStackTrace();
+					}
 				}
 			}.start();
 		}
-					
+		terminateSemaphore.acquire();
+		System.out.println("Congratulations! All test cases has been passed!");
 	}
 
 }

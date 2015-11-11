@@ -11,15 +11,17 @@ public class AuxiliaryNode implements Serializable {
 	
 	private static final long serialVersionUID = 1L;
 	
+	public final Serializable key;
 	public FusedNode fusedNode;
 	
-	public AuxiliaryNode(FusedNode fusedNode){
+	public AuxiliaryNode(Serializable key, FusedNode fusedNode){
+		this.key = key;
 		this.fusedNode = fusedNode;
 	}
 	
 	@Override
 	public String toString(){
-		return "AuxiliaryNode->fusedNode"+fusedNode.id;
+		return key+"= fusedNode["+fusedNode.id+"]";
 	}
 	
 }

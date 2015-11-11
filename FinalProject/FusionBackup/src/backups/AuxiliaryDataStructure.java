@@ -7,43 +7,37 @@ import java.io.Serializable;
  *
  * @author Josh
  *
- * @param <K> The type of key
  */
-public interface AuxiliaryDataStructure<K extends Serializable> {
+public interface AuxiliaryDataStructure{
 
 	/**
 	 * Add a new auxiliary node and its key into this data structure
 	 * @param key the key
 	 * @param node the added auxiliary node
 	 */
-	public void put(K key, AuxiliaryNode node);
+	public void put(Serializable key, AuxiliaryNode node);
 	
 	/**
 	 * Check if a key is already in this data structure
 	 * @param key the key
 	 * @return if it is in this data structure
 	 */
-	public boolean containsKey(K key);
+	public boolean containsKey(Serializable key);
 
 	/**
 	 * Remove an auxiliary node from this auxiliary data structure
 	 * @param key the key to remove
 	 * @return the removed node
 	 */
-	public AuxiliaryNode remove(K key);
+	public AuxiliaryNode remove(Serializable key);
 	
 	/**
 	 * Get an auxiliary node
 	 * @param key the key
 	 * @return the auxiliary node
 	 */
-	public AuxiliaryNode get(K key);
+	public AuxiliaryNode get(Serializable key);
 	
-	/**
-	 * Get all the entries in this data structure
-	 * @return All entries
-	 */
-	public Iterable<DataEntry<K, AuxiliaryNode>> entries();
 
 	/**
 	 * Get the size of this data structure

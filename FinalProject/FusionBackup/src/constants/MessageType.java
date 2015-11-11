@@ -11,6 +11,7 @@ public enum MessageType{
 	DATA_REQUEST,
 	DATA_RESPONSE,
 	BACKUP_UPDATE,
+	SIGNAL,
+	SIGNAL_ACK,
 	EXCEPTION
 }
-

@@ -34,7 +34,7 @@ public class FusedRepository {
 	public final int nodeSize;
 	public final int volume;
 	private final DoubleMatrix fuseVector;
-	private final AuxiliaryDataStructure<Serializable>[] auxDataStructures;
+	private final AuxiliaryDataStructure[] auxDataStructures;
 	private final ArrayList<FusedNode> dataStack;
 	private final CommunicationManager manager;
 	private final HashMap<Integer, Integer> repoid2connection;
@@ -43,6 +43,7 @@ public class FusedRepository {
 	private final HashMap<Integer, Integer> connection2clientid;
 	private final WriterReaderLock repomapLock = new WriterReaderLock(20);
 	private final WriterReaderLock clientmapLock = new WriterReaderLock(20);
+	private final Semaphore connectionLock = new Semaphore(1);
 	private final FusedNode lockNode;
 	
 	/**
@@ -52,7 +53,6 @@ public class FusedRepository {
 	 * @param id the id of this repository
 	 * @param cluster a map which contains id-ip:port pair for nodes in this cluster, for example (2, "192.168.1.1:12345")
 	 */
-	@SuppressWarnings("unchecked")
 	public FusedRepository(int nodeSize, int volume, int id, HashMap<Integer, String> cluster){
 		if(nodeSize <= 0)
 			throw new IllegalArgumentException("Illegal nodeSize "+nodeSize);
@@ -62,7 +62,7 @@ public class FusedRepository {
 		this.nodeSize = nodeSize;
 		this.volume = volume;
 		this.fuseVector = generateFuseVector();
-		this.auxDataStructures = (AuxiliaryDataStructure<Serializable>[])new AuxiliaryDataStructure[volume];
+		this.auxDataStructures = new AuxiliaryDataStructure[volume];
 		this.dataStack = new ArrayList<FusedNode>();
 		this.manager = new CommunicationManager();
 		this.repoid2connection = new HashMap<Integer, Integer>();
@@ -143,10 +143,13 @@ public class FusedRepository {
 		try{
 			if(primaryId >= volume || primaryId < 0)
 				throw new IllegalArgumentException("Illegal primaryId "+primaryId);
-			AuxiliaryDataStructure<Serializable> aux = getOrCreateAuxiliaryDataStructure(primaryId);
-			if(aux.containsKey(key))
-				aux.get(key).fusedNode.updateData(covertToDataVector(prev), covertToDataVector(cur), primaryId);
-			else{
+			AuxiliaryDataStructure aux = getOrCreateAuxiliaryDataStructure(primaryId);
+			if(aux.containsKey(key)){
+				FusedNode fnode = aux.get(key).fusedNode;
+				fnode.lock();
+				fnode.updateData(covertToDataVector(prev), covertToDataVector(cur), primaryId);
+				fnode.unlock();
+			}else{
 				FusedNode fnode = null;
 				FusedNode end = aux.size() > 0? dataStack.get(aux.size()-1): lockNode;
 				end.lock();
@@ -159,17 +162,18 @@ public class FusedRepository {
 					}
 				}catch(IndexOutOfBoundsException e){}
 				if(fnode == null){
-					fnode = new FusedNode(nodeSize, fuseVector, dataStack.size());
+					assert(aux.size() == dataStack.size());
+					fnode = new FusedNode(nodeSize, fuseVector, aux.size());
 					fnode.lock();
 					dataStack.add(fnode);
 				}
 				end.unlock();
-				AuxiliaryNode anode = null;
 				fnode.updateData(new DoubleMatrix(nodeSize), covertToDataVector(cur), primaryId);
-				anode = new AuxiliaryNode(fnode);
+				AuxiliaryNode anode = new AuxiliaryNode(key, fnode);
 				fnode.setAuxiliaryNode(anode, primaryId);
 				fnode.unlock();
 				aux.put(key, anode);
+				assert(aux.get(key).fusedNode.getAuxiliaryNode(primaryId) == aux.get(key));
 			}
 		}catch(Exception e){
 			e.printStackTrace();
@@ -188,7 +192,7 @@ public class FusedRepository {
 		try{
 			if(primaryId >= volume || primaryId < 0)
 				throw new IllegalArgumentException("Illegal primaryId "+primaryId);
-			AuxiliaryDataStructure<Serializable> aux = getOrCreateAuxiliaryDataStructure(primaryId);
+			AuxiliaryDataStructure aux = getOrCreateAuxiliaryDataStructure(primaryId);
 			if(!aux.containsKey(key))
 				throw new BackupFailureException("Key does not exist! Operation cannot be completed!");
 			FusedNode endNode = dataStack.get(aux.size()-1);
@@ -215,10 +219,10 @@ public class FusedRepository {
 	
 	
 	
-	private AuxiliaryDataStructure<Serializable> getOrCreateAuxiliaryDataStructure(int primaryId){
-		AuxiliaryDataStructure<Serializable> ret = auxDataStructures[primaryId];
+	private AuxiliaryDataStructure getOrCreateAuxiliaryDataStructure(int primaryId){
+		AuxiliaryDataStructure ret = auxDataStructures[primaryId];
 		if(ret == null){
-			ret = new AuxiliaryHashMap<Serializable>();
+			ret = new AuxiliaryHashMap();
 			auxDataStructures[primaryId] = ret;
 		}
 		return ret;
@@ -259,7 +263,7 @@ public class FusedRepository {
 		return ret;
 	}
 	
-	private LinkedList<DataEntry<Serializable, ArrayList<Double>>> getData(int primaryId) throws RecoverFailureException{
+	private ArrayList<DataEntry<Serializable, ArrayList<Double>>> getData(int primaryId) throws RecoverFailureException{
 		try{
 			if(primaryId >= volume || primaryId < 0)
 				throw new IllegalArgumentException("Illegal primary id "+primaryId);
@@ -267,12 +271,13 @@ public class FusedRepository {
 				throw new RecoverFailureException("Data of primary "+primaryId+" is not in this repository!");
 			ArrayList<DoubleMatrix> matrices = new ArrayList<DoubleMatrix>();
 			DoubleMatrix recoverVector = getEncodedmatricesAndRecoverVector(matrices, primaryId);
-			assert(matrices.size() == dataStack.size());
 			assert(recoverVector != null && recoverVector.length == volume);
-			LinkedList<DataEntry<Serializable, ArrayList<Double>>> ret = new LinkedList<DataEntry<Serializable, ArrayList<Double>>>();
-			for(DataEntry<Serializable, AuxiliaryNode> entry : auxDataStructures[primaryId].entries()){
-				DoubleMatrix decodedData = matrices.get(entry.value.fusedNode.id).mmul(recoverVector);
-				ret.add(new DataEntry<Serializable, ArrayList<Double>>(entry.key, convertToArrayList(decodedData)));
+			AuxiliaryDataStructure aux = getOrCreateAuxiliaryDataStructure(primaryId);
+			ArrayList<DataEntry<Serializable, ArrayList<Double>>> ret = new ArrayList<DataEntry<Serializable, ArrayList<Double>>>();
+			for(int i=0; i<aux.size(); i++){
+				DoubleMatrix decodedData = matrices.get(i).mmul(recoverVector);
+				Serializable key = dataStack.get(i).getAuxiliaryNode(primaryId).key;
+				ret.add(new DataEntry<Serializable, ArrayList<Double>>(key, convertToArrayList(decodedData)));
 			}
 			return ret;
 		}catch(Exception e){
@@ -288,11 +293,11 @@ public class FusedRepository {
 	}
 	
 	private DoubleMatrix getEncodedmatricesAndRecoverVector(ArrayList<DoubleMatrix> matrices, int primary) throws RecoverFailureException{
-		clientmapLock.readerLock();
-		repomapLock.readerLock();
+		lockConnection();
 		try {
 			LinkedList<Integer> empties = new LinkedList<Integer>();
 			int columns = 0;
+			clientmapLock.readerLock();
 			for(int i=0; i<volume; i++)
 				if(!hasData(i)){
 					columns++;
@@ -300,35 +305,43 @@ public class FusedRepository {
 				}
 				else if(clientid2connection.containsKey(i))
 					columns++;
+			clientmapLock.readerUnlock();
+			repomapLock.readerLock();
 			columns += repoid2connection.size();
+			repomapLock.readerUnlock();
 			if(columns < volume)
 				throw new RecoverFailureException("Only "+columns+" columns can be collected! Unable to recover!");
 			//First round, pause all operations
 			LinkedList<Semaphore> semaphores = new LinkedList<Semaphore>();
-			final Thread waitThread = Thread.currentThread();
+			clientmapLock.readerLock();
 			for(final Integer connection: connection2clientid.keySet()){
 				final Semaphore s = new Semaphore(0);
 				semaphores.add(s);
-				manager.sendMessageForResponse(connection, 
-						new Message().put("MessageType", MessageType.PAUSE_UPDATE),
-						new MessageFilter(){
-					@Override
-					public boolean filter(Message msg) {
-						return msg!=null && msg.containsKey("MessageType") 
-								&& msg.get("MessageType") == MessageType.UPDATE_PAUSED;
-					}
-				}, 5000, new OnMessageReceivedListener(){
-					@Override
-					public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-						s.release();
-					}
-					@Override
-					public void OnReceiveError(CommunicationManager manager, int id) {
-						System.err.println("Unable to receive UPDATE_PAUSED from connection "+connection);
-						waitThread.interrupt();
-					}	
-				}, false);
+				try {
+					manager.sendMessageForResponse(connection, 
+							new Message().put("MessageType", MessageType.PAUSE_UPDATE),
+							new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg!=null && msg.containsKey("MessageType") 
+									&& msg.get("MessageType") == MessageType.UPDATE_PAUSED;
+						}
+					}, 5000, new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							s.release();
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							System.err.println("Unable to receive UPDATE_PAUSED from connection "+connection);
+							s.release();
+						}	
+					}, false);
+				} catch (IOException e) {
+					s.release();
+				}
 			}
+			clientmapLock.readerUnlock();
 			for(Semaphore s : semaphores)
 				s.acquire();
 			final ArrayList<HashMap<Integer, DoubleMatrix>> rawData = new ArrayList<HashMap<Integer, DoubleMatrix>>();
@@ -342,59 +355,14 @@ public class FusedRepository {
 			columnQueue.addAll(empties);
 			//Second round, require data from these primaries
 			semaphores = new LinkedList<Semaphore>();
+			clientmapLock.readerLock();
 			for(Map.Entry<Integer, Integer> entry: clientid2connection.entrySet()){
 				final int primaryId = entry.getKey();
 				if(!hasData(primaryId)) continue;
 				final int connection = entry.getValue();
 				final Semaphore s = new Semaphore(0);
 				semaphores.add(s);
-				manager.sendMessageForResponse(connection, 
-						new Message().put("MessageType", MessageType.DATA_REQUEST),
-						new MessageFilter(){
-					@Override
-					public boolean filter(Message msg) {
-						return msg!=null && msg.containsKey("MessageType") 
-								&& msg.get("MessageType") == MessageType.DATA_RESPONSE;
-					}
-				}, 5000, new OnMessageReceivedListener(){
-					@SuppressWarnings("unchecked")
-					@Override
-					public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-						ArrayList<ArrayList<Double>> data = (ArrayList<ArrayList<Double>>) msg.get("data");
-						assert(data != null);
-						if(data.size() == auxDataStructures[primaryId].size()){
-							synchronized(columnQueue){
-								if(columnQueue.size() == volume){
-									s.release();
-									return;
-								}
-								columnQueue.add(primaryId);
-							}
-							for(int i=0; i<data.size(); i++){
-								HashMap<Integer, DoubleMatrix> node = rawData.get(i);
-								node.put(primaryId, covertToDataVector(data.get(i)));
-							}
-						}
-						s.release();
-					}
-					@Override
-					public void OnReceiveError(CommunicationManager manager, int id) {
-						System.err.println("Unable to receive DATA_RESPONSE from connection "+connection);
-						s.release();
-					}	
-				}, false);
-			}
-			for(Semaphore s : semaphores)
-				s.acquire();
-
-			if(columnQueue.size() < volume){
-				//Third Round, get data from repositories
-				semaphores = new LinkedList<Semaphore>();
-				for(Map.Entry<Integer, Integer> entry: repoid2connection.entrySet()){
-					final int repoId = entry.getKey();
-					final int connection = entry.getValue();
-					final Semaphore s = new Semaphore(0);
-					semaphores.add(s);
+				try {
 					manager.sendMessageForResponse(connection, 
 							new Message().put("MessageType", MessageType.DATA_REQUEST),
 							new MessageFilter(){
@@ -403,23 +371,23 @@ public class FusedRepository {
 							return msg!=null && msg.containsKey("MessageType") 
 									&& msg.get("MessageType") == MessageType.DATA_RESPONSE;
 						}
-					}, 5000, new OnMessageReceivedListener(){
+					}, 10000, new OnMessageReceivedListener(){
 						@SuppressWarnings("unchecked")
 						@Override
 						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
 							ArrayList<ArrayList<Double>> data = (ArrayList<ArrayList<Double>>) msg.get("data");
 							assert(data != null);
-							if(data.size() == dataStack.size()){
+							if(data.size() == auxDataStructures[primaryId].size()){
 								synchronized(columnQueue){
 									if(columnQueue.size() == volume){
 										s.release();
 										return;
 									}
-									columnQueue.add(repoId+volume);
+									columnQueue.add(primaryId);
 								}
 								for(int i=0; i<data.size(); i++){
 									HashMap<Integer, DoubleMatrix> node = rawData.get(i);
-									node.put(repoId+volume, covertToDataVector(data.get(i)));
+									node.put(primaryId, covertToDataVector(data.get(i)));
 								}
 							}
 							s.release();
@@ -430,7 +398,64 @@ public class FusedRepository {
 							s.release();
 						}	
 					}, false);
+				} catch (IOException e) {
+					s.release();
 				}
+			}
+			clientmapLock.readerUnlock();
+			for(Semaphore s : semaphores)
+				s.acquire();
+
+			if(columnQueue.size() < volume){
+				//Third Round, get data from repositories
+				semaphores = new LinkedList<Semaphore>();
+				repomapLock.readerLock();
+				for(Map.Entry<Integer, Integer> entry: repoid2connection.entrySet()){
+					final int repoId = entry.getKey();
+					final int connection = entry.getValue();
+					final Semaphore s = new Semaphore(0);
+					semaphores.add(s);
+					try {
+						manager.sendMessageForResponse(connection, 
+								new Message().put("MessageType", MessageType.DATA_REQUEST),
+								new MessageFilter(){
+							@Override
+							public boolean filter(Message msg) {
+								return msg!=null && msg.containsKey("MessageType") 
+										&& msg.get("MessageType") == MessageType.DATA_RESPONSE;
+							}
+						}, 10000, new OnMessageReceivedListener(){
+							@SuppressWarnings("unchecked")
+							@Override
+							public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+								ArrayList<ArrayList<Double>> data = (ArrayList<ArrayList<Double>>) msg.get("data");
+								assert(data != null);
+								if(data.size() == dataStack.size()){
+									synchronized(columnQueue){
+										if(columnQueue.size() == volume){
+											s.release();
+											return;
+										}
+										columnQueue.add(repoId+volume);
+									}
+									for(int i=0; i<data.size(); i++){
+										HashMap<Integer, DoubleMatrix> node = rawData.get(i);
+										node.put(repoId+volume, covertToDataVector(data.get(i)));
+									}
+								}
+								s.release();
+							}
+							@Override
+							public void OnReceiveError(CommunicationManager manager, int id) {
+								System.err.println("Unable to receive DATA_RESPONSE from connection "+connection);
+								s.release();
+							}	
+						}, false);
+					} catch (IOException e) {
+						s.release();
+					}
+				}
+				repomapLock.readerUnlock();
 				for(Semaphore s : semaphores)
 					s.acquire();
 			}
@@ -462,8 +487,10 @@ public class FusedRepository {
 			assert(Convert.rows == Convert.columns);
 			return Solve.pinv(Convert).getColumn(primary);
 		} catch (Exception e) {
+			e.printStackTrace();
 			throw new RecoverFailureException("Unable to get encoded matrix due to "+e);
 		} finally{
+			clientmapLock.readerLock();
 			for(final Integer connection: connection2clientid.keySet()){
 				try {
 					manager.sendMessage(connection, new Message().put("MessageType", MessageType.RESUME_UPDATE));
@@ -471,17 +498,29 @@ public class FusedRepository {
 					System.err.println("Error! Unable to send RESUME_UPDATE!");
 				}
 			}
-			repomapLock.readerUnlock();	
 			clientmapLock.readerUnlock();
+			unlockConnection();
 		}
 
+	}
+	
+	private void lockConnection(){
+		try {
+			connectionLock.acquire();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	private void unlockConnection(){
+		connectionLock.release();
 	}
 	
 	private class ClusterMessageListener implements OnMessageReceivedListener{
 
 		@Override
 		public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-			assert(msg.containsKey("MessageType"));
+			if(!msg.containsKey("MessageType")) return;
 			repomapLock.readerLock();
 			final int nodeId = connection2repoid.get(id);
 			repomapLock.readerUnlock();
@@ -527,7 +566,7 @@ public class FusedRepository {
 		@SuppressWarnings("unchecked")
 		@Override
 		public void OnMessageReceived(final CommunicationManager manager, final int id, Message msg) {
-			assert(msg.containsKey("MessageType"));
+			if(!msg.containsKey("MessageType")) return;
 			clientmapLock.readerLock();
 			final int clientId = connection2clientid.get(id);
 			clientmapLock.readerUnlock();
@@ -553,7 +592,7 @@ public class FusedRepository {
 						if(!hasData(clientId)){
 							Message reply = new Message().put("MessageType", MessageType.RECOVER_RESULT);
 							reply.put("success", true).
-								  put("result", new LinkedList<DataEntry<Serializable, ArrayList<Double>>>());
+								  put("result", new ArrayList<DataEntry<Serializable, ArrayList<Double>>>());
 							manager.sendMessage(id, reply);
 						}else{
 							new Thread(){
@@ -561,12 +600,13 @@ public class FusedRepository {
 								public void run(){
 									Message reply = new Message().put("MessageType", MessageType.RECOVER_RESULT);
 									try{
-										LinkedList<DataEntry<Serializable, ArrayList<Double>>> result = getData(clientId);
+										ArrayList<DataEntry<Serializable, ArrayList<Double>>> result = getData(clientId);
 										reply.put("success", true).
 											  put("result", result);
 									}catch(RecoverFailureException e){
 										e.printStackTrace();
 										reply.put("success", false);
+										reply.put("reason", e.toString());
 									}
 									try {
 										manager.sendMessage(id, reply);
@@ -576,6 +616,9 @@ public class FusedRepository {
 								}
 							}.start();
 						}
+						break;
+					case SIGNAL:
+						manager.sendMessage(id, new Message().put("MessageType", MessageType.SIGNAL_ACK));
 						break;
 					case EXCEPTION:
 						System.err.println("ClientMessageListener: Client "+clientId+" has internal error: "+msg.get("Exception"));
@@ -614,6 +657,7 @@ public class FusedRepository {
 					int nodeId = (Integer) msg.get("id");
 					NodeType type = (NodeType) msg.get("NodeType");
 					boolean success = false;
+					lockConnection();
 					if(type == NodeType.CLIENT){
 						clientmapLock.writerLock();
 						if(nodeId<0 || nodeId>=volume || clientid2connection.containsKey(nodeId)){
@@ -641,6 +685,7 @@ public class FusedRepository {
 						}
 						repomapLock.writerUnlock();
 					}
+					unlockConnection();
 					if(!success) return;
 					try {
 						manager.sendMessage(id, new Message().put("MessageType", MessageType.CONNECT_ACCEPTED));
@@ -688,7 +733,7 @@ public class FusedRepository {
 			str.append("    "+node+"\n");
 		str.append("  ]\n");
 		str.append("Auxiliary data structures:\n  [\n");
-		for(AuxiliaryDataStructure<Serializable> aux : auxDataStructures)
+		for(AuxiliaryDataStructure aux : auxDataStructures)
 			str.append("    "+aux+"\n");
 		str.append("  ]\n");
 		str.append("}\n");
@@ -705,8 +750,8 @@ public class FusedRepository {
 		cluster.put(4, ip+":12349");
 		FusedRepository repo0 = new FusedRepository(2, 4, 0, cluster);
 		FusedRepository repo1 = new FusedRepository(2, 4, 1, cluster);
-//		FusedRepository repo2 = new FusedRepository(2, 4, 2, cluster);
-//		FusedRepository repo3 = new FusedRepository(2, 4, 3, cluster);
+		FusedRepository repo2 = new FusedRepository(2, 4, 2, cluster);
+		FusedRepository repo3 = new FusedRepository(2, 4, 3, cluster);
 //		FusedRepository repo4 = new FusedRepository(2, 4, 4, cluster);
 	}
 }
