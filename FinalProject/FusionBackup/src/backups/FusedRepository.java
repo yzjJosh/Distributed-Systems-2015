@@ -3,7 +3,6 @@ package backups;
 import java.io.IOException;
 import java.io.Serializable;
 import java.net.Inet4Address;
-import java.net.UnknownHostException;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 
@@ -43,8 +42,10 @@ public class FusedRepository {
 	private final HashMap<Integer, Integer> connection2clientid;
 	private final WriterReaderLock repomapLock = new WriterReaderLock(20);
 	private final WriterReaderLock clientmapLock = new WriterReaderLock(20);
-	private final Semaphore connectionLock = new Semaphore(1);
+	private final WriterReaderLock connectionLock = new WriterReaderLock(1);
+	private final Object pauseLock = new Object();
 	private final FusedNode lockNode;
+	private int pauseCount = 0;
 	
 	/**
 	 * Initialize this repository.
@@ -293,7 +294,8 @@ public class FusedRepository {
 	}
 	
 	private DoubleMatrix getEncodedmatricesAndRecoverVector(ArrayList<DoubleMatrix> matrices, int primary) throws RecoverFailureException{
-		lockConnection();
+		connectionLock.readerLock();
+		boolean paused = false;
 		try {
 			LinkedList<Integer> empties = new LinkedList<Integer>();
 			int columns = 0;
@@ -326,7 +328,7 @@ public class FusedRepository {
 							return msg!=null && msg.containsKey("MessageType") 
 									&& msg.get("MessageType") == MessageType.UPDATE_PAUSED;
 						}
-					}, 5000, new OnMessageReceivedListener(){
+					}, 10000, new OnMessageReceivedListener(){
 						@Override
 						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
 							s.release();
@@ -344,6 +346,10 @@ public class FusedRepository {
 			clientmapLock.readerUnlock();
 			for(Semaphore s : semaphores)
 				s.acquire();
+			paused = true;
+			synchronized(pauseLock){
+				pauseCount++;
+			}
 			final ArrayList<HashMap<Integer, DoubleMatrix>> rawData = new ArrayList<HashMap<Integer, DoubleMatrix>>();
 			for(FusedNode fnode: dataStack){
 				HashMap<Integer, DoubleMatrix> node = new HashMap<Integer, DoubleMatrix>();
@@ -378,6 +384,12 @@ public class FusedRepository {
 							ArrayList<ArrayList<Double>> data = (ArrayList<ArrayList<Double>>) msg.get("data");
 							assert(data != null);
 							if(data.size() == auxDataStructures[primaryId].size()){
+								/*try {
+									manager.sendMessage(id, new Message());
+								} catch (IOException e) {
+									s.release();
+									return;
+								}*/
 								synchronized(columnQueue){
 									if(columnQueue.size() == volume){
 										s.release();
@@ -490,31 +502,25 @@ public class FusedRepository {
 			e.printStackTrace();
 			throw new RecoverFailureException("Unable to get encoded matrix due to "+e);
 		} finally{
-			clientmapLock.readerLock();
-			for(final Integer connection: connection2clientid.keySet()){
-				try {
-					manager.sendMessage(connection, new Message().put("MessageType", MessageType.RESUME_UPDATE));
-				} catch (IOException e) {
-					System.err.println("Error! Unable to send RESUME_UPDATE!");
+			if(paused){
+				synchronized(pauseLock){
+					pauseCount--;
 				}
+				clientmapLock.readerLock();
+				for(final Integer connection: connection2clientid.keySet()){
+					try {
+						manager.sendMessage(connection, new Message().put("MessageType", MessageType.RESUME_UPDATE));
+					} catch (IOException e) {
+						System.err.println("Error! Unable to send RESUME_UPDATE!");
+					}
+				}
+				clientmapLock.readerUnlock();
 			}
-			clientmapLock.readerUnlock();
-			unlockConnection();
+			connectionLock.readerUnlock();
 		}
 
 	}
 	
-	private void lockConnection(){
-		try {
-			connectionLock.acquire();
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-	}
-	
-	private void unlockConnection(){
-		connectionLock.release();
-	}
 	
 	private class ClusterMessageListener implements OnMessageReceivedListener{
 
@@ -573,6 +579,13 @@ public class FusedRepository {
 			try {
 				switch((MessageType)msg.get("MessageType")){
 					case BACKUP_UPDATE:
+						synchronized(pauseLock){
+							if(pauseCount > 0){
+								System.err.println("Fatal error: update received after pause, from client "+clientId);
+								System.exit(-1);
+								return;
+							}
+						}
 						switch((UpdateType)msg.get("UpdateType")){
 							case PUT:
 								Serializable key = msg.get("key");
@@ -657,7 +670,7 @@ public class FusedRepository {
 					int nodeId = (Integer) msg.get("id");
 					NodeType type = (NodeType) msg.get("NodeType");
 					boolean success = false;
-					lockConnection();
+					connectionLock.writerLock();
 					if(type == NodeType.CLIENT){
 						clientmapLock.writerLock();
 						if(nodeId<0 || nodeId>=volume || clientid2connection.containsKey(nodeId)){
@@ -667,7 +680,7 @@ public class FusedRepository {
 							clientid2connection.put(nodeId, id);
 							connection2clientid.put(id, nodeId);
 							manager.setOnMessageReceivedListener(id, new ClientMessageListener());
-							System.out.println("ConnectionEstablishmentListener: Connected to client "+nodeId);
+							System.out.println("ConnectionEstablishmentListener: Connected to client "+nodeId+", connection id: "+id);
 							success = true;
 						}
 						clientmapLock.writerUnlock();
@@ -680,13 +693,15 @@ public class FusedRepository {
 							repoid2connection.put(nodeId, id);
 							connection2repoid.put(id, nodeId);
 							manager.setOnMessageReceivedListener(id, new ClusterMessageListener());
-							System.out.println("ConnectionEstablishmentListener: Connected to repository "+nodeId);
+							System.out.println("ConnectionEstablishmentListener: Connected to repository "+nodeId+", connection id: "+id);
 							success = true;
 						}
 						repomapLock.writerUnlock();
 					}
-					unlockConnection();
-					if(!success) return;
+					if(!success) {
+						connectionLock.writerUnlock();
+						return;
+					}
 					try {
 						manager.sendMessage(id, new Message().put("MessageType", MessageType.CONNECT_ACCEPTED));
 					} catch (IOException e) {
@@ -706,6 +721,7 @@ public class FusedRepository {
 						System.err.println("ConnectionEstablishmentListener: Unable to send CONNECT_ACCEPTED!");
 						manager.closeConnection(id);
 					}
+					connectionLock.writerUnlock();
 				}
 				@Override
 				public void OnReceiveError(CommunicationManager manager, int id) {

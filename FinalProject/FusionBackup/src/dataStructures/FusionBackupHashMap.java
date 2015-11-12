@@ -150,9 +150,9 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 										put("key", key).
 										put("prev", prevlist).
 										put("cur", curlist);
-			Set<Integer> keySet = null;
+			HashSet<Integer> keySet = new HashSet<Integer>();
 			synchronized(mapLock){
-				keySet = connection2id.keySet();
+				keySet.addAll(connection2id.keySet());
 			}
 			for(Integer connection: keySet)
 				try {
@@ -187,9 +187,9 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 										put("key", (Serializable)key).
 										put("val", val).
 										put("end", end);
-			Set<Integer> keySet = null;
+			HashSet<Integer> keySet = new HashSet<Integer>();
 			synchronized(mapLock){
-				keySet = connection2id.keySet();
+				keySet.addAll(connection2id.keySet());
 			}
 			for(Integer connection: keySet)
 				try {
@@ -463,11 +463,11 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 								try {
 									manager.sendMessageForResponse(id, new Message().put("MessageType", MessageType.UPDATE_PAUSED), 
 											   new MessageFilter(){
-												@Override
-												public boolean filter(Message msg) {
-													return msg != null && msg.containsKey("MessageType")
-															&& msg.get("MessageType") == MessageType.RESUME_UPDATE;
-												}
+													@Override
+													public boolean filter(Message msg) {
+														return msg != null && msg.containsKey("MessageType")
+																&& msg.get("MessageType") == MessageType.RESUME_UPDATE;
+													}
 												}, 20000, 
 												new OnMessageReceivedListener(){
 													@Override
@@ -533,6 +533,8 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 			synchronized(pauseNumLock){
 				pauseNum ++;
 				pauseNumLock.notifyAll();
+				if(pauseNum <= 0) 
+					return;
 			}
 			synchronized(isPausedLock){
 				while(!isPaused)
@@ -734,13 +736,13 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	
 	private static FusionBackupHashMap<String, Integer> testRecover(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm, HashMap<Integer, String> cluster, int id){
 		System.out.println("Testing recovery ...");
-		HashSet<Integer> connections = new HashSet<Integer>();
-		connections.addAll(fm.connection2id.keySet());
-		for(int connection: connections)
-			fm.manager.closeConnection(connection);
+		synchronized(fm.mapLock){
+			for(int connection: fm.connection2id.keySet())
+				fm.manager.closeConnection(connection);
+		}
 		try {
 			Thread.sleep(500);
-		} catch (InterruptedException e) {
+		} catch (InterruptedException e){
 			e.printStackTrace();
 		}
 		fm = new FusionBackupHashMap<String, Integer>(cluster, id, new IntegerCoder());

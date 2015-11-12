@@ -5,7 +5,6 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
-import java.util.zip.CRC32;
 
 import exceptions.TerminateException;
 
@@ -318,7 +317,7 @@ public class CommunicationManager {
 		public synchronized void transmit(Message msg) throws IOException{
 			if(msg == null)
 				throw new NullPointerException("Cannot send null message!");
-			msg.addCRC();
+			msg.addVerification();
 			ostream.reset();
 			ostream.writeObject(msg);
 		}
@@ -340,7 +339,7 @@ public class CommunicationManager {
 						}
 					} catch (InterruptedException e) {}
 					final Message msg = (Message)istream.readObject();
-					if(!msg.verifyCRC()) continue;
+					if(!msg.verify()) continue;
 					//System.out.println(msg);
 					synchronized(listenerLock){
 						if(msgListener != null){

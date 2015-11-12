@@ -21,6 +21,7 @@ public class Message implements Serializable {
 	private final HashMap<String, Serializable> data = new HashMap<String, Serializable>();
 	
 	private long crc = 0; //The crc which is used to verify this message.
+	private int checkSum = 0; // The checksum is used to verify this message.
 	
 	/**
 	 * Put an entry into this message
@@ -64,7 +65,10 @@ public class Message implements Serializable {
 		return data.toString();
 	}
 	
-	private long calculateCRC(){
+	/**
+	 * Add CRC32 code into this message, which can be verified later
+	 */
+	public void addVerification(){
 		ByteArrayOutputStream bos = new ByteArrayOutputStream();
 		ObjectOutputStream out = null;
 		byte[] bytes = null;
@@ -76,25 +80,38 @@ public class Message implements Serializable {
 		} catch(IOException e){
 			e.printStackTrace();
 		}
-		if(bytes == null) return 0;
 		CRC32 CRC = new CRC32();
 		CRC.update(bytes);
-		return CRC.getValue();
+		crc = CRC.getValue();
+		checkSum = 0;
+		for(byte b: bytes)
+			checkSum += b;
 	}
 	
 	/**
-	 * Add CRC32 code into this message, which can be verified later
-	 */
-	public void addCRC(){
-		crc = calculateCRC();
-	}
-	
-	/**
-	 * Verify the CRC32 code of this message
+	 * Verify the correctness of this message
 	 * @return if this message is right or not
 	 */
-	public boolean verifyCRC(){
-		return crc == calculateCRC();
+	public boolean verify(){
+		ByteArrayOutputStream bos = new ByteArrayOutputStream();
+		ObjectOutputStream out = null;
+		byte[] bytes = null;
+		try {
+			out = new ObjectOutputStream(bos);   
+			out.writeObject(data);
+			bytes = bos.toByteArray();
+			out.close();bos.close();
+		} catch(IOException e){
+			e.printStackTrace();
+		}
+		CRC32 CRC = new CRC32();
+		CRC.update(bytes);
+		if(crc != CRC.getValue())
+			return false;
+		int checksum = 0;
+		for(byte b: bytes)
+			checksum += b;
+		return checksum == checkSum;
 	}
 	
 	/**
@@ -107,10 +124,10 @@ public class Message implements Serializable {
 			int rand = (int)Math.random()*5000;
 			msg.put(""+rand, rand);
 		}
-		msg.addCRC();
-		assert(msg.verifyCRC());
-		msg.put("3", 4);
-		assert(!msg.verifyCRC());
+		msg.addVerification();
+		assert(msg.verify());
+		msg.put(null, null);
+		assert(!msg.verify());
 		System.out.println("Pass!");
 	}
 
