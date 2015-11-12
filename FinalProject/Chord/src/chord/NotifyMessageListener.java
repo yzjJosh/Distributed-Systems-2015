@@ -4,7 +4,7 @@ import communication.CommunicationManager;
 import communication.Message;
 import communication.OnMessageReceivedListener;
 /**
- * JoinNodeListener, can be seen as the client-end listener
+ * NotifyNodeListener
  * @author Yu Sun
  */
 public class NotifyMessageListener implements OnMessageReceivedListener {
