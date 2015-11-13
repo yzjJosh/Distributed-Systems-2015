@@ -16,7 +16,7 @@ public class ChordNodeListener implements OnConnectionListener {
 		this.node = node;
 	}
 	@Override
-	public void OnConnected(CommunicationManager manager, int id) {
+	public void OnConnected(CommunicationManager manager, int id) {   
 		
 			manager.setOnMessageReceivedListener(id, new OnMessageReceivedListener() {
 

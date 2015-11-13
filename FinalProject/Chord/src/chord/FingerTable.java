@@ -29,6 +29,14 @@ public class FingerTable implements Serializable {
 		return fingers[i];
 	}
 	
+	public void print() {
+		System.out.println("********---------------------------------------------------------------------***********");
+		for (int i = 0; i < fingers.length; i++) {
+			System.out.println("start: " + fingers[i].start.getID() + " | interval: [" + fingers[i].interval[0].getID() + " , " + fingers[i].interval[1].getID() + ") | successor: " + fingers[i].node.getChordID().getID());
+		}
+		System.out.println("********---------------------------------------------------------------------***********");
+	}
+	
 	
 //		List <FingerTableEntry> fingers = new ArrayList<FingerTableEntry> ();
 //		int size = 0;

@@ -71,7 +71,7 @@ public class ChordNode implements Serializable {
 		}
 		reader.close();
 		// Write new node info into the file.
-		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(path)));
+		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(path), true));
 		// Add itself to the information sheet.
 		// Specify a random port number.
 		port = (int) (10000 + Math.random() * 10000);
@@ -94,36 +94,7 @@ public class ChordNode implements Serializable {
 			int id_link = manager.connect(connect_ip, connect_port);
 			listOfLinks.put(ids.get(index), id_link); // Bind the chord id with
 														// a link num
-			manager.setOnMessageReceivedListener(id_link,
-					new OnMessageReceivedListener() {
-
-						@Override
-						public void OnMessageReceived(
-								CommunicationManager manager, int id,
-								Message msg) {
-
-							if (msg.containsKey("MessageType")) {
-								if (msg.get("MessageType").equals(
-										"NotifyPredecessor")) {
-									try {
-										manager.sendMessage(id, new Message()
-												.put("Reply", ChordNode.this));
-									} catch (IOException e) {
-										System.err
-												.println("Reply notify predecessor error!");
-									}
-								}
-							}
-
-						}
-
-						@Override
-						public void OnReceiveError(
-								CommunicationManager manager, int id) {
-							System.err.println("Received error!");
-						}
-
-					});
+			manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(this));
 			try {
 				manager.sendMessageForResponse(id_link,
 						new Message().put("MessageType", "RequestJoin"),
@@ -442,10 +413,8 @@ public class ChordNode implements Serializable {
 				}
 			}
 			int successorID = finger.node.getChordID().getID();
-			final LinkedList<Serializable> result = new LinkedList<Serializable>(); // STOTE
-																					// THE
-																					// RETURN
-																					// DATA
+			final LinkedList<Serializable> result = new LinkedList<Serializable>(); // STOTE THE RETURN DATA
+			System.out.println(successorID);
 			if (clusterInfo.containsKey(successorID)) {
 				// If the link has been set up.
 				if (listOfLinks.containsKey(successorID)) {
@@ -474,7 +443,7 @@ public class ChordNode implements Serializable {
 											CommunicationManager manager,
 											int id, Message msg) {
 										System.out
-												.println("Store reqeust has been sent to the next node!");
+												.println("Oh, yeah!! The corresponding value is " + msg.get("RetrieveReply"));
 										result.add(msg.get("RetrieveReply"));
 									}
 
@@ -482,7 +451,7 @@ public class ChordNode implements Serializable {
 									public void OnReceiveError(
 											CommunicationManager manager, int id) {
 										System.err
-												.println("On reveived error in the storedata function!");
+												.println("On reveived error in the getValue function!");
 										result.add(null);
 									}
 
@@ -525,7 +494,7 @@ public class ChordNode implements Serializable {
 											CommunicationManager manager,
 											int id, Message msg) {
 										System.out
-												.println("Store reqeust has been sent to the next node!");
+												.println("Oh, yeah!! The corresponding value is " + msg.get("RetrieveReply"));
 										result.add(msg.get("RetrieveReply"));
 									}
 
@@ -533,7 +502,7 @@ public class ChordNode implements Serializable {
 									public void OnReceiveError(
 											CommunicationManager manager, int id) {
 										System.err
-												.println("On reveived error in the storedata function!");
+												.println("On reveived error in the getValue function!");
 										result.add(null);
 									}
 
@@ -590,8 +559,19 @@ public class ChordNode implements Serializable {
 			public void run() {	
 				BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 				while (true) {
+					// stablize
+					ChordNode preceding = node.getSuccessor().getPredecessor();
+					node.stabilize();
+					if (preceding == null) {
+						node.getSuccessor().stabilize();
+					} else {
+						preceding.stabilize();
+					}
+					// fix fingertable
+					node.fixFingers();
+					
 					try {
-					System.out.println("Do you want to 1. store data or 2. retrieve data?");
+					System.out.println("Do you want to 1. store data or 2. retrieve data or 3. print finger table or 4. print successor and predecessor?");
 					String option = br.readLine();
 					if (option.equals("1")) {
 						System.out.println("Please input the key and value!");
@@ -604,19 +584,18 @@ public class ChordNode implements Serializable {
 						String key = br.readLine();
 						System.out.println("The value is " + node.getValue(key));
 						
+					} else if (option.equals("3")) {
+						node.fingerTable.print();
+						
+					}  else if (option.equals("4")) {
+						String successor = node.successor == null ? "null" : node.successor.getChordID().getID() + "";
+						String predecessor = node.predecessor == null ? "null" : node.predecessor.getChordID().getID() + "";
+						System.out.println("Successor: " + successor  + " | Predecessor: " + predecessor);
+						
 					} else {
 						System.out.println("Input is illegal!!");
 					}
-					// stablize
-					ChordNode preceding = node.getSuccessor().getPredecessor();
-					node.stabilize();
-					if (preceding == null) {
-						node.getSuccessor().stabilize();
-					} else {
-						preceding.stabilize();
-					}
-					// fix fingertable
-					node.fixFingers();
+					
 					} catch (IOException e) {
 						System.out.println("IO Error");
 					}
