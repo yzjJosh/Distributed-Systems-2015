@@ -20,7 +20,13 @@ public class GenericMessageListener implements OnMessageReceivedListener{
 	public void OnMessageReceived(CommunicationManager manager, int id,
 			Message msg) {
 		if (msg.containsKey("MessageType" )) {
-			if(msg.get("MessageType").equals("NotifyPredecessor")) {
+			if (msg.get("MessageType").equals("RequestJoin")) {
+				try {
+					manager.sendMessage(id, new Message().put("Reply", node));
+				} catch (IOException e) {
+					e.printStackTrace();
+				}						
+			} else if(msg.get("MessageType").equals("NotifyPredecessor")) {
 				try {
 					manager.sendMessage(id, new Message().put("Reply", node));
 				} catch (IOException e) {

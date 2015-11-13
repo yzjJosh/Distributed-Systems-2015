@@ -115,7 +115,7 @@ public class ChordNode implements Serializable {
 				System.err.println(e);
 			}
 		}
-		manager.waitForConnection(port, new ChordNodeListener(this));
+		manager.waitForConnection(port, new ChordNodeListener());
 
 	}
 
