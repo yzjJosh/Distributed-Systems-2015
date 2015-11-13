@@ -82,7 +82,7 @@ public class ChordNode implements Serializable {
 		writer.write(data);
 		writer.close();
 		fingerTable = new FingerTable(this);
-
+		System.out.println("fingerTable is set!");
 		int num = clusterInfo.size();
 
 		if (num > 0) {
@@ -287,7 +287,7 @@ public class ChordNode implements Serializable {
 		for (int i = 0; i < 32; i++) {
 			FingerTableEntry finger = fingerTable.getFinger(i);
 			ChordID key = finger.getStart();
-			System.out.println(key.getID());
+//			System.out.println(key.getID());
 			ChordNode node = find_successor(key);
 			finger.setNode(node);
 			finger.setInterval(key, node.getChordID());
@@ -569,6 +569,17 @@ public class ChordNode implements Serializable {
 		
 		try {
 			node.initConnection(file);
+			// stablize
+			ChordNode preceding = node.getSuccessor().getPredecessor();
+			node.stabilize();
+			if (preceding == null) {
+				node.getSuccessor().stabilize();
+			} else {
+				preceding.stabilize();
+			}
+			// fix fingertable
+			node.fixFingers();
+			
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {
@@ -591,7 +602,8 @@ public class ChordNode implements Serializable {
 					} else if (option.equals("2")) {
 						System.out.println("Please input the key for retrival!");
 						String key = br.readLine();
-						node.getValue(key);
+						System.out.println("The value is " + node.getValue(key));
+						
 					} else {
 						System.out.println("Input is illegal!!");
 					}
