@@ -4,8 +4,10 @@ import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Scanner;
 
 import communication.CommunicationManager;
 import communication.Message;
@@ -82,6 +84,7 @@ public class ChordNode implements Serializable {
 		fingerTable = new FingerTable(this);
 
 		int num = clusterInfo.size();
+
 		if (num > 0) {
 			int index = (int) Math.random() * num;
 			String[] splits = clusterInfo.get(ids.get(index)).split(" ");
@@ -98,6 +101,7 @@ public class ChordNode implements Serializable {
 						public void OnMessageReceived(
 								CommunicationManager manager, int id,
 								Message msg) {
+
 							if (msg.containsKey("MessageType")) {
 								if (msg.get("MessageType").equals(
 										"NotifyPredecessor")) {
@@ -180,8 +184,9 @@ public class ChordNode implements Serializable {
 				return finger.getNode();
 			}
 		}
-		return this;
+		return this; 
 
+	
 	}
 
 	/**
@@ -559,24 +564,53 @@ public class ChordNode implements Serializable {
 	}
 
 	public static void main(String[] args) {
-		ChordNode node = new ChordNode();
+		final ChordNode node = new ChordNode();
+		final String file = args[0];
+		
 		try {
-			node.initConnection(args[0]);
-			// stablize
-			ChordNode preceding = node.getSuccessor().getPredecessor();
-			node.stabilize();
-			if (preceding == null) {
-				node.getSuccessor().stabilize();
-			} else {
-				preceding.stabilize();
-			}
-			// fix fingertable
-			node.fixFingers();
+			node.initConnection(file);
 		} catch (FileNotFoundException e) {
 			e.printStackTrace();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+		new Thread() {
+			@Override
+			public void run() {	
+				BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+				while (true) {
+					try {
+					System.out.println("Do you want to 1. store data or 2. retrieve data?");
+					String option = br.readLine();
+					if (option.equals("1")) {
+						System.out.println("Please input the key and value!");
+						String data = br.readLine();
+						String key = data.split(" ")[0];
+						String value = data.split(" ")[1];
+						node.storeData(key, value);
+					} else if (option.equals("2")) {
+						System.out.println("Please input the key for retrival!");
+						String key = br.readLine();
+						node.getValue(key);
+					} else {
+						System.out.println("Input is illegal!!");
+					}
+					// stablize
+					ChordNode preceding = node.getSuccessor().getPredecessor();
+					node.stabilize();
+					if (preceding == null) {
+						node.getSuccessor().stabilize();
+					} else {
+						preceding.stabilize();
+					}
+					// fix fingertable
+					node.fixFingers();
+					} catch (IOException e) {
+						System.out.println("IO Error");
+					}
+				}
+			}
+		}.start();
 	}
 
 }
