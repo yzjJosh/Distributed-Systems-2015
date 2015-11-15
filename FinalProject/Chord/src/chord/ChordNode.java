@@ -8,6 +8,7 @@ import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Scanner;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 import communication.CommunicationManager;
@@ -598,7 +599,8 @@ public class ChordNode implements Serializable {
 			e.printStackTrace();
 		}
 		
-		node.fingerTable.print();
+		//Unit test
+		/*node.fingerTable.print();
 		for(int i=0; i<10000; i++){
 			assert(node.closest_preceding_finger(new ChordID(i)) == node);
 		}
@@ -610,7 +612,7 @@ public class ChordNode implements Serializable {
 			entry.node = new ChordNode();
 			entry.node.identifier = entry.start;
 			for(int j=0; j<1000; j++){
-				int rand = (int)(Math.random()*Integer.MAX_VALUE);
+				long rand = (long)(Math.random()*Integer.MAX_VALUE);
 				assert(rand >= 0);
 				ChordNode should = (rand > entry.node.identifier.getID() || rand <= node.identifier.getID())? entry.node: node;
 				assert(node.closest_preceding_finger(new ChordID(rand)) == entry.node || node.closest_preceding_finger(new ChordID(rand)) == node);
@@ -619,17 +621,30 @@ public class ChordNode implements Serializable {
 			}
 			entry.node = node;
 		}
-		TreeSet<Integer> ids = new TreeSet<Integer>();	
+		TreeMap<Long, ChordNode> ids = new TreeMap<Long, ChordNode>();	
 		for(int i=0; i<10000; i++){
-			long id = (long)(Math.random()*((1<<32)-1)) - node.identifier.getID();
-			if(id < 0)
-				id += 1<<32;
-			int k = (int)(Math.log(id-node.identifier.getID())/Math.log(2.0)-1);
+			long index = (long)(Math.random()*((1L<<32)-1));
+			long id = (index + node.identifier.getID()) % (1L<<32);
+			if(index != 0){
+				int k = (int)(Math.log(index)/Math.log(2.0));
+				FingerTableEntry entry = node.fingerTable.getFinger(k);
+				ChordNode c = new ChordNode();
+				c.identifier = new ChordID(id);
+				entry.node = c;
+				ids.put(id, c);
+			}else{
+				ids.put(id, node);
+			}
+		}
+		for(int i=0; i<10000; i++){
+			long id = (long)(Math.random()*((1L<<32)-1));
+			assert(node.getPredecessor() == ids.floorEntry(id).getValue()):
+				"Got "+node.getPredecessor().identifier.getID()+", which should be "+ids.floorKey(id);
 		}
 		
-		System.out.println("pass!");
+		System.out.println("pass!");*/
 		
-		/*new Thread() {
+		new Thread() {
 			@Override
 			public void run() {
 				while (true) {
@@ -689,7 +704,7 @@ public class ChordNode implements Serializable {
 					}
 				}
 			}
-		}.start();*/
+		}.start();
 	}
 
 }
