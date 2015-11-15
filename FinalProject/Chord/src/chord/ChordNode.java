@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -58,40 +59,64 @@ public class ChordNode implements Serializable {
 	public void initConnection(String path) throws IOException,
 			FileNotFoundException {
 
-		String serverInfo;
-		BufferedReader reader = new BufferedReader(new FileReader(
-				new File(path)));
-		while ((serverInfo = reader.readLine()) != null) {
+		String serverInfo; // for read a line.
+		String selfInfo; //store self info.
+		String replacedLine = "";
+		String replacingLine = "";
+		BufferedReader reader = new BufferedReader(new FileReader(new File(path)));
+		StringBuilder oldText = new StringBuilder();
+		boolean already = false;
+		int active_num = 0;
+		while ((serverInfo = reader.readLine()) != null && serverInfo != "") {
 			// Split the serverInfo to get the host and port.
+			oldText.append(serverInfo + "\n");
 			String[] splits = serverInfo.split(" ");
 			String ip = splits[0];
-			int port = Integer.parseInt(splits[1]);
-			long hash = Long.parseLong(splits[2]);
+			String port = splits[1];
+			String active = splits[2];
+			if (active.equals("1"))
+				active_num++;
+			if (already == false && active.equals("0")) {
+				this.ip = ip;
+				this.port = Integer.parseInt(port);
+				this.identifier = new ChordID(port + ip);
+				selfInfo = ip + " " + port + " " + identifier.getID() + "\n";
+				replacedLine = serverInfo;
+				replacingLine =  ip + " " + port + " " + 1;
+				System.out.println(selfInfo);
+				already = true;
+			}
+			long hash = new ChordID(ip + port).getID();
 			clusterInfo.put(hash, serverInfo);
 			ids.add(hash);
-
+		
 		}
 		reader.close();
 		// Write new node info into the file.
-		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(path), true));
-		// Add itself to the information sheet.
-		// Specify a random port number.
-		port = (int) (10000 + Math.random() * 10000);
-		ip = InetAddress.getLocalHost().getHostAddress();
-		identifier = new ChordID(port + ip);
-		String data = ip + " " + port + " " + identifier.getID() + "\n";
-		System.out.println(data);
-		writer.write(data);
+		BufferedWriter writer = new BufferedWriter(new FileWriter(new File(path)));
+		String oldTxt = oldText.toString();
+		String newTxt = oldTxt.replaceAll(replacedLine, replacingLine);
+		writer.write(newTxt);
 		writer.close();
+		
 		fingerTable = new FingerTable(this);
 		System.out.println("fingerTable is set!");
-		int num = clusterInfo.size();
+		
+		int num = clusterInfo.size();	
 
-		if (num > 0) {
+		if (num > 0 && active_num > 0) {
 			int index = (int) Math.random() * num;
 			String[] splits = clusterInfo.get(ids.get(index)).split(" ");
 			String connect_ip = splits[0];
-			int connect_port = Integer.parseInt(splits[1]);
+			int connect_port =  Integer.parseInt(splits[1]);
+			while (!splits[2].equals("1")) {
+				index = (int) Math.random() * num;
+				splits = clusterInfo.get(ids.get(index)).split(" ");
+				connect_ip = splits[0];
+				connect_port = Integer.parseInt(splits[1]);
+			}
+
+			
 			// Connect to an exsiting node
 			int id_link = manager.connect(connect_ip, connect_port);
 			listOfLinks.put(ids.get(index), id_link); // Bind the chord id with a link num.
@@ -590,6 +615,11 @@ public class ChordNode implements Serializable {
 
 	public static void main(String[] args) {
 		final String file = args[0];
+		try {
+			System.out.println(InetAddress.getLocalHost().getHostAddress());
+		} catch (UnknownHostException e1) {
+			e1.printStackTrace();
+		}
 		final ChordNode node = new ChordNode();
 		try {
 			node.initConnection(file);
