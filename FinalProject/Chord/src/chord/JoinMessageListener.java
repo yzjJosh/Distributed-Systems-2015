@@ -15,7 +15,7 @@ public class JoinMessageListener implements OnMessageReceivedListener {
 	@Override
 	public void OnMessageReceived(CommunicationManager manager, int id,
 			Message msg) {
-		System.out.println("Ready to join..");
+		System.out.println("Ready to join node " + ((ChordNode) msg.get("Reply")).getChordID().getID());
 		node.join((ChordNode) msg.get("Reply"));
 		
 		

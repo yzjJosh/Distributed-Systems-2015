@@ -20,8 +20,22 @@ public class FingerTable implements Serializable {
 	public FingerTable(ChordNode node) {
 		this.fingers = new FingerTableEntry[32];
 		for (int i = 0; i < fingers.length; i++) {
-			ChordID start = node.getChordID();
+			int start_id = (int) ((node.getChordID().getID() + (long) Math.pow(2, i-1)) % (1L<<32)); 
+			ChordID start = new ChordID(start_id);
 			fingers[i] = new FingerTableEntry(start, node);
+		}
+		
+		for (int i = 0; i < fingers.length; i++) {
+			if (i == fingers.length - 1) {
+				ChordID interval_1 = fingers[i].start;
+				ChordID interval_2 = new ChordID(fingers[0].start.getID() - 1);
+				fingers[i].setInterval(interval_1, interval_2);
+			} else {
+				ChordID interval_1 = fingers[i].start;
+				ChordID interval_2 = fingers[i+1].start;
+				fingers[i].setInterval(interval_1, interval_2);
+			}
+			
 		}
 	}
 

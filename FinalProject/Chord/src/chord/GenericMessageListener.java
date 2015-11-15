@@ -22,12 +22,14 @@ public class GenericMessageListener implements OnMessageReceivedListener{
 		if (msg.containsKey("MessageType" )) {
 			if (msg.get("MessageType").equals("RequestJoin")) {
 				try {
+					System.out.println("Receive request of join!");
 					manager.sendMessage(id, new Message().put("Reply", node));
 				} catch (IOException e) {
 					e.printStackTrace();
 				}						
 			} else if(msg.get("MessageType").equals("NotifyPredecessor")) {
 				try {
+					System.out.println("Received notification and ready to reply!");
 					manager.sendMessage(id, new Message().put("Reply", node));
 				} catch (IOException e) {
 					System.err.println("Reply notify predecessor error!");
@@ -51,6 +53,12 @@ public class GenericMessageListener implements OnMessageReceivedListener{
 						System.err.println("No the corresponding value!");
 					}
 				} 
+			} else if(msg.get("MessageType").equals("LinkSetup")) {
+				Serializable clientID = msg.get("ClientID");
+				System.out.println("Add a client : " + clientID + "to listOflinks! ");
+				node.listOfLinks.put((Integer)clientID, id);
+				
+				
 			}
 		}
 		

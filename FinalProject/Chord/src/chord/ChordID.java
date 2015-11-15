@@ -13,7 +13,10 @@ public class ChordID implements Comparable, Serializable{
 	private static final long serialVersionUID = 1L;
 	private int id = 0;
 	public ChordID (String identifier) {
-		id = identifier.hashCode(); 
+		id = Math.abs(identifier.hashCode()); 
+	}
+	public ChordID (int identifier) {
+		id = identifier; 
 	}
 	public int getID() {
 		return id;
@@ -41,10 +44,18 @@ public class ChordID implements Comparable, Serializable{
 			return false;
 	}
 	public boolean isBetween(ChordID c1, ChordID c2) {
-		if (this.compareTo(c1) == 1) {
-			if (this.compareTo(c2) == -1)
+		if (c1.compareTo(c2) == -1) {
+			if (this.compareTo(c1) == 1 && this.compareTo(c2) == -1) {
 				return true;	
+			}
+		} else if (c1.compareTo(c2) == 1) {
+			if (this.compareTo(c1) == 1 || this.compareTo(c2) == -1){
+				return true;
+			}
+		} else if (c1.compareTo(c2) == 0) {
+			return true;
 		}
+		
 		return false;
 	}
 	

@@ -15,6 +15,7 @@ public class NotifyMessageListener implements OnMessageReceivedListener {
 	@Override
 	public void OnMessageReceived(CommunicationManager manager, int id,
 			Message msg) {
+		System.out.println("receive reply from notified node!");
 		node.notifyPredecessor((ChordNode) msg.get("Reply"));
 		
 		
