@@ -53,7 +53,7 @@ public class ChordID implements Comparable, Serializable{
 				return true;
 			}
 		} else if (c1.compareTo(c2) == 0) {
-			return true;
+			return this.compareTo(c1) != 0;
 		}
 		
 		return false;
