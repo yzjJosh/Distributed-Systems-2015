@@ -296,7 +296,7 @@ public class ChordNode implements Serializable {
 
 	public void notifyPredecessor(ChordNode node) {
 		ChordID key = node.getChordID();
-		System.out.println("Start notify process!");
+//		System.out.println("Start notify process!");
 		if (predecessor == null
 				|| key.isBetween(predecessor.getChordID(), this.getChordID())) {
 			predecessor = node;
@@ -358,8 +358,7 @@ public class ChordNode implements Serializable {
 									public void OnMessageReceived(
 											CommunicationManager manager,
 											int id, Message msg) {
-										System.out
-												.println("Store reqeust has been sent to the next node!");
+										System.out.println("Store reqeust has been sent to the next node! ");
 										result.add(true);
 									}
 
@@ -371,7 +370,7 @@ public class ChordNode implements Serializable {
 										result.add(false);
 									}
 
-								}, false);
+								}, true);
 
 					} catch (IOException e) {
 						e.printStackTrace();
@@ -430,7 +429,7 @@ public class ChordNode implements Serializable {
 										result.add(false);
 									}
 
-								}, false);
+								}, true);
 						
 
 					} catch (IOException e) {
@@ -508,11 +507,12 @@ public class ChordNode implements Serializable {
 										result.add(null);
 									}
 
-								}, false);
+								}, true);
 
 					} catch (IOException e) {
 						e.printStackTrace();
 					}
+					return result.peek();
 				} else {
 					String[] splits = clusterInfo.get(successorID).split(" ");
 					String connect_ip = splits[0];
@@ -561,7 +561,7 @@ public class ChordNode implements Serializable {
 										result.add(null);
 									}
 
-								}, false);
+								}, true);
 						
 
 					} catch (IOException e) {

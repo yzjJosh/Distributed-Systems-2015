@@ -28,7 +28,7 @@ public class GenericMessageListener implements OnMessageReceivedListener{
 					e.printStackTrace();
 				}						
 			} else if(msg.get("MessageType").equals("Notify")) {
-				System.out.println("Received notification!");
+//				System.out.println("Received notification!");
 				node.notifyPredecessor((ChordNode) (msg.get("Notifier")));
 				
 			} else if(msg.get("MessageType").equals("StoreData")) {
