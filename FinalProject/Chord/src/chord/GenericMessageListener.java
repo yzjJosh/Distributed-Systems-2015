@@ -52,7 +52,7 @@ public class GenericMessageListener implements OnMessageReceivedListener{
 			} else if(msg.get("MessageType").equals("LinkSetup")) {
 				Serializable clientID = msg.get("ClientID");
 				System.out.println("Add a client : " + clientID + "to listOflinks! ");
-				node.listOfLinks.put((Integer)clientID, id);
+				node.listOfLinks.put((Long)clientID, id);
 			} else if(msg.get("MessageType").equals("FindPredecessor")) {
 				ChordID chord_id = (ChordID) msg.get("ID");
 				ChordNode temp = node.closest_preceding_finger(chord_id);

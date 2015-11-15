@@ -44,10 +44,10 @@ public class ChordNode implements Serializable {
 	 */
 
 	protected ChordNode predecessor = this;
-	protected HashMap<Integer, Integer> listOfLinks = new HashMap<Integer, Integer>(); // The list of the ids of links.
+	protected HashMap<Long, Integer> listOfLinks = new HashMap<Long, Integer>(); // The list of the ids of links.
 	private static final int MAX_RESPONSE_TIME = 5000; // The maximum response time of this system.
-	private static final HashMap<Integer, String> clusterInfo = new HashMap<Integer, String>(); // information  about other node.
-	private static final ArrayList<Integer> ids = new ArrayList<Integer>();
+	private static final HashMap<Long, String> clusterInfo = new HashMap<Long, String>(); // information  about other node.
+	private static final ArrayList<Long> ids = new ArrayList<Long>();  //store all the hashes of other nodes
 	private static HashMap<Serializable, Serializable> data = new HashMap<Serializable, Serializable>(); // The data stored in the chord node.
 
 	protected transient List<Socket> socket = new LinkedList<Socket>();
@@ -64,7 +64,7 @@ public class ChordNode implements Serializable {
 			String[] splits = serverInfo.split(" ");
 			String ip = splits[0];
 			int port = Integer.parseInt(splits[1]);
-			int hash = Integer.parseInt(splits[2]);
+			long hash = Long.parseLong(splits[2]);
 			clusterInfo.put(hash, serverInfo);
 			ids.add(hash);
 
@@ -144,7 +144,7 @@ public class ChordNode implements Serializable {
 //		System.out.println("Before find predecessor!");
 		final LinkedList<ChordNode> result = new LinkedList<ChordNode>();
 		while (!id.isBetween(this.getChordID(), successor.getChordID()) && !id.equals(successor.getChordID())) {
-			int m_id = m.identifier.getID();
+			long m_id = m.identifier.getID();
 			if (m_id != this.identifier.getID()) {
 				if (clusterInfo.containsKey(m_id)) {
 					// If the link has been set up.
@@ -260,7 +260,7 @@ public class ChordNode implements Serializable {
 				successor = node;
 			}
 		}
-		int successorID = successor.getChordID().getID();
+		long successorID = successor.getChordID().getID();
 		if (clusterInfo.containsKey(successorID)) {
 			// If the link has been set up.
 			if (listOfLinks.containsKey(successorID)) {
@@ -328,7 +328,7 @@ public class ChordNode implements Serializable {
 					break;
 				}
 			}
-			int successorID = finger.node.getChordID().getID();
+			long successorID = finger.node.getChordID().getID();
 			final LinkedList<Boolean> result = new LinkedList<Boolean>();
 			if (clusterInfo.containsKey(successorID)) {
 				// If the link has been set up.
@@ -463,7 +463,7 @@ public class ChordNode implements Serializable {
 					break;
 				}
 			}
-			int successorID = finger.node.getChordID().getID();
+			long successorID = finger.node.getChordID().getID();
 			final LinkedList<Serializable> result = new LinkedList<Serializable>(); // STOTE THE RETURN DATA
 			System.out.println(successorID);
 			if (clusterInfo.containsKey(successorID)) {
