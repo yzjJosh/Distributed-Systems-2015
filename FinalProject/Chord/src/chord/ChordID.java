@@ -22,7 +22,7 @@ public class ChordID implements Comparable, Serializable{
 		return id;
 	}
 	
-	public void setID(int id) {
+	public void setID(long id) {
 		this.id = id;
 	}
 	
