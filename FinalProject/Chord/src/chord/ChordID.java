@@ -11,18 +11,18 @@ public class ChordID implements Comparable, Serializable{
 	 * 
 	 */
 	private static final long serialVersionUID = 1L;
-	private int id = 0;
+	private long id = 0;
 	public ChordID (String identifier) {
 		id = Math.abs(identifier.hashCode()); 
 	}
-	public ChordID (int identifier) {
+	public ChordID (long identifier) {
 		id = identifier; 
 	}
-	public int getID() {
+	public long getID() {
 		return id;
 	}
 	
-	public void setID(int id) {
+	public void setID(long id) {
 		this.id = id;
 	}
 	
@@ -59,8 +59,6 @@ public class ChordID implements Comparable, Serializable{
 		return false;
 	}
 	
-	static public void main(String args) {
 
-	}
 
 }

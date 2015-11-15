@@ -27,13 +27,9 @@ public class GenericMessageListener implements OnMessageReceivedListener{
 				} catch (IOException e) {
 					e.printStackTrace();
 				}						
-			} else if(msg.get("MessageType").equals("NotifyPredecessor")) {
-				try {
-					System.out.println("Received notification and ready to reply!");
-					manager.sendMessage(id, new Message().put("Reply", node));
-				} catch (IOException e) {
-					System.err.println("Reply notify predecessor error!");
-				}
+			} else if(msg.get("MessageType").equals("Notify")) {
+				System.out.println("Received notification!");
+				node.notifyPredecessor((ChordNode) (msg.get("Notifier")));
 				
 			} else if(msg.get("MessageType").equals("StoreData")) {
 				boolean storeFlag = node.storeData(msg.get("Key"), msg.get("Value"));
@@ -56,9 +52,15 @@ public class GenericMessageListener implements OnMessageReceivedListener{
 			} else if(msg.get("MessageType").equals("LinkSetup")) {
 				Serializable clientID = msg.get("ClientID");
 				System.out.println("Add a client : " + clientID + "to listOflinks! ");
-				node.listOfLinks.put((Integer)clientID, id);
-				
-				
+				node.listOfLinks.put((Long)clientID, id);
+			} else if(msg.get("MessageType").equals("FindPredecessor")) {
+				ChordID chord_id = (ChordID) msg.get("ID");
+				ChordNode temp = node.closest_preceding_finger(chord_id);
+				try {
+					manager.sendMessage(id, new Message().put("NextNode",temp));
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 			}
 		}
 		
