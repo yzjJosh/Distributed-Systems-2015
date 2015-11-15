@@ -8,6 +8,7 @@ import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Scanner;
+import java.util.TreeSet;
 
 import communication.CommunicationManager;
 import communication.Message;
@@ -545,9 +546,8 @@ public class ChordNode implements Serializable {
 	}
 
 	public static void main(String[] args) {
-		final ChordNode node = new ChordNode();
 		final String file = args[0];
-		
+		final ChordNode node = new ChordNode();
 		try {
 			node.initConnection(file);
 		} catch (FileNotFoundException e) {
@@ -556,7 +556,38 @@ public class ChordNode implements Serializable {
 			e.printStackTrace();
 		}
 		
-		new Thread() {
+		node.fingerTable.print();
+		for(int i=0; i<10000; i++){
+			assert(node.closest_preceding_finger(new ChordID(i)) == node);
+		}
+		for(int i=0; i<1000; i++){
+			int index = (int)(Math.random()*32);
+			if(index == 0) continue;
+			FingerTableEntry entry = node.fingerTable.getFinger(index);
+			assert(entry.node == node);
+			entry.node = new ChordNode();
+			entry.node.identifier = entry.start;
+			for(int j=0; j<1000; j++){
+				int rand = (int)(Math.random()*Integer.MAX_VALUE);
+				assert(rand >= 0);
+				ChordNode should = (rand > entry.node.identifier.getID() || rand <= node.identifier.getID())? entry.node: node;
+				assert(node.closest_preceding_finger(new ChordID(rand)) == entry.node || node.closest_preceding_finger(new ChordID(rand)) == node);
+				assert(node.closest_preceding_finger(new ChordID(rand)) == should)
+					:"Got "+node.closest_preceding_finger(new ChordID(rand)).identifier.getID()+", which should be "+should.identifier.getID();
+			}
+			entry.node = node;
+		}
+		TreeSet<Integer> ids = new TreeSet<Integer>();	
+		for(int i=0; i<10000; i++){
+			long id = (long)(Math.random()*((1<<32)-1)) - node.identifier.getID();
+			if(id < 0)
+				id += 1<<32;
+			int k = (int)(Math.log(id-node.identifier.getID())/Math.log(2.0)-1);
+		}
+		
+		System.out.println("pass!");
+		
+		/*new Thread() {
 			@Override
 			public void run() {
 				while (true) {
@@ -616,7 +647,7 @@ public class ChordNode implements Serializable {
 					}
 				}
 			}
-		}.start();
+		}.start();*/
 	}
 
 }
