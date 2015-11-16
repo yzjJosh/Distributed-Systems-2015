@@ -210,6 +210,8 @@ public class ChordNode implements Serializable {
 						try {
 							int id_link = manager.connect(connect_ip, connect_port);
 							listOfLinks.put(m_id, id_link); // Bind the chord id with
+							manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(this));
+							manager.sendMessage(id_link, new Message().put("MessageType", "LinkSetup").put("ClientID", identifier.getID()));
 							manager.sendMessageForResponse(listOfLinks.get(m_id), new Message().put("MessageType", "FindPredecessor").put("ID", id), new MessageFilter() {
 								@Override
 								public boolean filter(Message msg) {		
@@ -306,8 +308,7 @@ public class ChordNode implements Serializable {
 			try {
 				int id_link = manager.connect(connect_ip, connect_port);
 				listOfLinks.put(successorID, id_link); // Bind the chord id with
-				manager.setOnMessageReceivedListener(id_link,
-						new GenericMessageListener(this));
+				manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(this));
 				manager.sendMessage(id_link, new Message().put("MessageType", "LinkSetup").put("ClientID", identifier.getID()));
 				manager.sendMessage(id_link, new Message().put("MessageType", "Notify").put("Notifier", ChordNode.this));
 				
@@ -416,8 +417,7 @@ public class ChordNode implements Serializable {
 					try {
 						int id_link = manager.connect(connect_ip, connect_port);
 						listOfLinks.put(successorID, id_link); // Bind the chord id with
-						manager.setOnMessageReceivedListener(id_link,
-								new GenericMessageListener(ChordNode.this));
+						manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(ChordNode.this));
 						manager.sendMessage(id_link, new Message().put("MessageType", "LinkSetup").put("ClientID", identifier.getID()));
 						manager.sendMessageForResponse(
 								listOfLinks.get(successorID),
@@ -519,8 +519,7 @@ public class ChordNode implements Serializable {
 									public void OnMessageReceived(
 											CommunicationManager manager,
 											int id, Message msg) {
-										System.out
-												.println("Oh, yeah!! The corresponding value is " + msg.get("RetrieveReply"));
+										System.out.println("Oh, yeah!! The corresponding value is " + msg.get("RetrieveReply"));
 										result.add(msg.get("RetrieveReply"));
 									}
 
@@ -547,16 +546,12 @@ public class ChordNode implements Serializable {
 					try {
 						int id_link = manager.connect(connect_ip, connect_port);
 						listOfLinks.put(successorID, id_link); // Bind the chord id with
-						manager.setOnMessageReceivedListener(id_link,
-								new GenericMessageListener(ChordNode.this));
+						manager.setOnMessageReceivedListener(id_link, new GenericMessageListener(ChordNode.this));
 						manager.sendMessage(id_link, new Message().put("MessageType", "LinkSetup").put("ClientID", identifier.getID()));
 						manager.sendMessageForResponse(
 								id_link,
-								new Message()
-										.put("MessageType", "RetrieveData")
-										.put("Key", key),
+								new Message().put("MessageType", "RetrieveData").put("Key", key),
 								new MessageFilter() {
-
 									@Override
 									public boolean filter(Message msg) {
 										if (msg != null) {
@@ -600,6 +595,26 @@ public class ChordNode implements Serializable {
 			return data.get(key);
 		}
 	}
+	
+	public void updateInfo(String file_path) {
+		try {
+			String serverInfo;
+			BufferedReader reader = new BufferedReader(new FileReader(new File(file_path)));
+			
+			while ((serverInfo = reader.readLine()) != null) {
+				// Split the serverInfo to get the host and port.
+				String[] splits = serverInfo.split(" ");
+				long hash = Long.parseLong(splits[2]);
+				if ( !clusterInfo.containsKey(hash) ) {
+					clusterInfo.put(hash, serverInfo);
+					ids.add(hash);
+				}		
+			}
+			reader.close();
+			} catch(IOException e) {
+				 e.printStackTrace();
+			 }
+	}
 
 	public ChordID getChordID() {
 		return identifier;
@@ -621,6 +636,7 @@ public class ChordNode implements Serializable {
 			e1.printStackTrace();
 		}
 		final ChordNode node = new ChordNode();
+		final Object o = new Object();
 		try {
 			node.initConnection(file);
 		} catch (FileNotFoundException e) {
@@ -628,72 +644,31 @@ public class ChordNode implements Serializable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		
-		//Unit test
-		/*node.fingerTable.print();
-		for(int i=0; i<10000; i++){
-			assert(node.closest_preceding_finger(new ChordID(i)) == node);
-		}
-		for(int i=0; i<1000; i++){
-			int index = (int)(Math.random()*32);
-			if(index == 0) continue;
-			FingerTableEntry entry = node.fingerTable.getFinger(index);
-			assert(entry.node == node);
-			entry.node = new ChordNode();
-			entry.node.identifier = entry.start;
-			for(int j=0; j<1000; j++){
-				long rand = (long)(Math.random()*Integer.MAX_VALUE);
-				assert(rand >= 0);
-				ChordNode should = (rand > entry.node.identifier.getID() || rand <= node.identifier.getID())? entry.node: node;
-				assert(node.closest_preceding_finger(new ChordID(rand)) == entry.node || node.closest_preceding_finger(new ChordID(rand)) == node);
-				assert(node.closest_preceding_finger(new ChordID(rand)) == should)
-					:"Got "+node.closest_preceding_finger(new ChordID(rand)).identifier.getID()+", which should be "+should.identifier.getID();
-			}
-			entry.node = node;
-		}
-		TreeMap<Long, ChordNode> ids = new TreeMap<Long, ChordNode>();	
-		for(int i=0; i<10000; i++){
-			long index = (long)(Math.random()*((1L<<32)-1));
-			long id = (index + node.identifier.getID()) % (1L<<32);
-			if(index != 0){
-				int k = (int)(Math.log(index)/Math.log(2.0));
-				FingerTableEntry entry = node.fingerTable.getFinger(k);
-				ChordNode c = new ChordNode();
-				c.identifier = new ChordID(id);
-				entry.node = c;
-				ids.put(id, c);
-			}else{
-				ids.put(id, node);
-			}
-		}
-		for(int i=0; i<10000; i++){
-			long id = (long)(Math.random()*((1L<<32)-1));
-			assert(node.getPredecessor() == ids.floorEntry(id).getValue()):
-				"Got "+node.getPredecessor().identifier.getID()+", which should be "+ids.floorKey(id);
-		}
-		
-		System.out.println("pass!");*/
+
 		
 		new Thread() {
 			@Override
 			public void run() {
+				
 				while (true) {
-				ChordNode preceding = node.getSuccessor().getPredecessor();
+					ChordNode preceding = node.getSuccessor().getPredecessor();
+				
+						// stablize
+						node.stabilize();
+						if (preceding == null) {
+							node.getSuccessor().stabilize();
+						} else {
+							preceding.stabilize();
+						}
+						// fix fingertable
+						node.fixFingers();
 		
-				// stablize
-				node.stabilize();
-				if (preceding == null) {
-					node.getSuccessor().stabilize();
-				} else {
-					preceding.stabilize();
-				}
-				// fix fingertable
-				node.fixFingers();
-				try {
-					Thread.sleep(2000);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
-				}
+					try {
+						Thread.sleep(2000);
+					} catch (InterruptedException e) {
+						e.printStackTrace();
+					}
+			
 			}
 			}
 		}.start();
@@ -721,6 +696,9 @@ public class ChordNode implements Serializable {
 						node.fingerTable.print();
 						
 					}  else if (option.equals("4")) {
+						synchronized(o) {	
+							node.updateInfo(file);
+						}
 						String successor = node.successor == null ? "null" : node.successor.getChordID().getID() + "";
 						String predecessor = node.predecessor == null ? "null" : node.predecessor.getChordID().getID() + "";
 						System.out.println("Successor: " + successor  + " | Predecessor: " + predecessor);
