@@ -79,7 +79,7 @@ public class ChordNode implements Serializable {
 			if (already == false && active.equals("0")) {
 				this.ip = ip;
 				this.port = Integer.parseInt(port);
-				this.identifier = new ChordID(port + ip);
+				this.identifier = new ChordID(ip + port);
 				selfInfo = ip + " " + port + " " + identifier.getID() + "\n";
 				replacedLine = serverInfo;
 				replacingLine =  ip + " " + port + " " + 1;
@@ -616,7 +616,7 @@ public class ChordNode implements Serializable {
 	public static void main(String[] args) {
 		final String file = args[0];
 		try {
-			System.out.println(InetAddress.getLocalHost().getHostAddress());
+			System.out.println(Inet4Address.getLocalHost().getHostAddress());
 		} catch (UnknownHostException e1) {
 			e1.printStackTrace();
 		}

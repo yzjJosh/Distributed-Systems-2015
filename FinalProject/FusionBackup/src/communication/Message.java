@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.zip.CRC32;
@@ -76,7 +77,8 @@ public class Message implements Serializable {
 			out = new ObjectOutputStream(bos);   
 			out.writeObject(data);
 			bytes = bos.toByteArray();
-			out.close();bos.close();
+			out.close();
+			bos.close();
 		} catch(IOException e){
 			e.printStackTrace();
 		}
@@ -128,6 +130,14 @@ public class Message implements Serializable {
 		assert(msg.verify());
 		msg.put(null, null);
 		assert(!msg.verify());
+		msg.addVerification();
+		assert(msg.verify());
+		HashSet<Long> set = new HashSet<Long>();
+		msg.put("set", set);
+		set.add(44432432L);
+		assert(!msg.verify());
+		msg.addVerification();
+		assert(msg.verify());
 		System.out.println("Pass!");
 	}
 

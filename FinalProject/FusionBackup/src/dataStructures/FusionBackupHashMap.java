@@ -44,7 +44,6 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	 * @param id the id of this hashmap. Id is the unique identifier to distinguish primaries in backup repository
 	 */
 	public FusionBackupHashMap(Map<Integer, String> hosts, int id, Coder<V> coder){
-		super();
 		if(coder == null)
 			throw new IllegalArgumentException("Coder must be specified!");
 		if(id < 0)
