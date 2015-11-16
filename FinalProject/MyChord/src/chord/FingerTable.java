@@ -17,8 +17,8 @@ public class FingerTable {
 		fingers[index].successor = successor;
 	}
 	
-	public long getSuccessor(int index){
-		return fingers[index].successor;
+	public long getStart(int index){
+		return fingers[index].start;
 	}
 	
 	public long closest_preceding_finger(long id) {
@@ -58,12 +58,12 @@ public class FingerTable {
 		}
 		for(int i=0; i<1000; i++){
 			int index = (int)(Math.random()*32);
-			assert(table.getSuccessor(index) == table.fingers[0].start-1);
+			assert(table.fingers[index].successor == table.fingers[0].start-1);
 			table.setSuccessor(index, table.fingers[0].start-1);
 			for(int j=0; j<1000; j++){
 				long rand = (long)(Math.random()*Integer.MAX_VALUE);
 				assert(rand >= 0);
-				long should = (rand > table.getSuccessor(index) || rand <= table.fingers[0].start-1)? table.getSuccessor(index): (table.fingers[0].start-1);
+				long should = (rand > table.fingers[index].successor || rand <= table.fingers[0].start-1)? table.fingers[index].successor: (table.fingers[0].start-1);
 				assert(table.closest_preceding_finger(rand) == should)
 				:"Got "+table.closest_preceding_finger(rand)+", which should be "+should;
 			}
