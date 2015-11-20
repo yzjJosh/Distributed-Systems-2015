@@ -13,7 +13,7 @@ public class FingerTable {
 		}
 	}
 	
-	public void setSuccessor(int index, long successor){
+	public synchronized void setSuccessor(int index, long successor){
 		fingers[index].successor = successor;
 	}
 	

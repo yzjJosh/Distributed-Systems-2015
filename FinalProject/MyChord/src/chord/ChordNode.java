@@ -25,9 +25,9 @@ public class ChordNode {
 	private final ConcurrentHashMap<Long, Integer> id2link;
 	private final FingerTable fingerTable;
 	private long predecessor;
-	private Object predecessorLock = new Object();
+	private final Object predecessorLock = new Object();
 	private long successor;
-	private Object successorLock = new Object();
+	private final Object successorLock = new Object();
 	
 	public ChordNode(Map<Integer, String> hosts, int index){
 		if(hosts == null || !hosts.containsKey(index) || hosts.get(index) == null)
