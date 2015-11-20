@@ -97,8 +97,6 @@ public class ChordNode {
 			} catch (InterruptedException e) {
 				e.printStackTrace();
 			}
-		int port = Integer.parseInt(hosts.get(index).split(":")[1]);
-		manager.waitForConnection(port, new ConnectionListener());
 		try {
 			join();
 			transferData();
@@ -106,6 +104,8 @@ public class ChordNode {
 			e.printStackTrace();
 		}
 		new StabilizeThread().start();
+		int port = Integer.parseInt(hosts.get(index).split(":")[1]);
+		manager.waitForConnection(port, new ConnectionListener());
 		System.out.println("ChordNode starts, id="+id);
 		System.out.println("Waiting for connection at port "+port);
 	}
@@ -115,9 +115,14 @@ public class ChordNode {
 	}
 	
 	public Serializable put(Serializable key, Serializable value) throws OperationFailsException{
-		long successor = find_successor(hash(key));
-		if(successor == id) 
-			return data.put(key, value);
+		long keyId = hash(key);
+		long successor = find_successor(keyId);
+		if(successor == id){
+			dataLock.writerLock();
+			Serializable ret = data.put(key, value);
+			dataLock.writerUnlock();
+			return ret;
+		}
 		final HashMap<String, Object> result = new HashMap<String, Object>();
 		try{
 			manager.sendMessageForResponse(id2link.get(successor), new Message().put("MessageType", MessageType.PUT).
@@ -127,7 +132,8 @@ public class ChordNode {
 						@Override
 						public boolean filter(Message msg) {
 							return msg != null && msg.containsKey("MessageType")
-									&& msg.get("MessageType") == MessageType.PUT_RESPONSE;
+									&& msg.get("MessageType") == MessageType.PUT_RESPONSE
+									&& msg.get("keyId").equals(keyId);
 						}					
 					}, 5000, 
 					new OnMessageReceivedListener(){
@@ -151,9 +157,14 @@ public class ChordNode {
 	}
 	
 	public Serializable get(Serializable key) throws OperationFailsException{
-		long successor = find_successor(hash(key));
-		if(successor == id)
-			return data.get(key);
+		long keyId = hash(key);
+		long successor = find_successor(keyId);
+		if(successor == id){
+			dataLock.readerLock();
+			Serializable ret = data.get(key);
+			dataLock.readerUnlock();
+			return ret;
+		}
 		final HashMap<String, Object> result = new HashMap<String, Object>();
 		try{
 			manager.sendMessageForResponse(id2link.get(successor), new Message().put("MessageType", MessageType.GET).
@@ -162,7 +173,8 @@ public class ChordNode {
 						@Override
 						public boolean filter(Message msg) {
 							return msg != null && msg.containsKey("MessageType")
-									&& msg.get("MessageType") == MessageType.GET_RESPONSE;
+									&& msg.get("MessageType") == MessageType.GET_RESPONSE
+									&& msg.get("keyId").equals(keyId);
 						}					
 					}, 5000, 
 					new OnMessageReceivedListener(){
@@ -241,7 +253,8 @@ public class ChordNode {
 						@Override
 						public boolean filter(Message msg) {
 							return msg!=null && msg.containsKey("MessageType")
-									&& msg.get("MessageType") == MessageType.FIND_PREDECESSOR_RESPONSE;
+									&& msg.get("MessageType") == MessageType.FIND_PREDECESSOR_RESPONSE
+									&& msg.get("target").equals(target);
 						}
 					}, 5000, 
 					new OnMessageReceivedListener(){
@@ -283,7 +296,8 @@ public class ChordNode {
 							@Override
 							public boolean filter(Message msg) {
 								return msg!=null && msg.containsKey("MessageType")
-										&& msg.get("MessageType") == MessageType.FIND_SUCCESSOR_RESPONSE;
+										&& msg.get("MessageType") == MessageType.FIND_SUCCESSOR_RESPONSE
+										&& msg.get("target").equals(ChordNode.this.id);
 							}
 						}, 5000, 
 						new OnMessageReceivedListener(){
@@ -330,6 +344,7 @@ public class ChordNode {
 						@Override
 						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {			
 							HashMap<Serializable, Serializable> response = (HashMap<Serializable, Serializable>) msg.get("result");
+							System.out.println("Got "+response.size()+" entries from successor!");
 							dataLock.writerLock();
 							for(Map.Entry<Serializable, Serializable> entry: response.entrySet())
 								data.put(entry.getKey(), entry.getValue());
@@ -439,6 +454,7 @@ public class ChordNode {
 									long result = help_other_find_predecessor(msg);
 									reply.put("success", true);
 									reply.put("result", result);
+									reply.put("target", msg.get("target"));
 								} catch (OperationFailsException e) {
 									reply.put("success", false);
 								}
@@ -463,6 +479,7 @@ public class ChordNode {
 									long result = find_successor((Long)msg.get("target"));
 									reply.put("result", result);
 									reply.put("success", true);
+									reply.put("target", msg.get("target"));
 								}catch(OperationFailsException e){
 									reply.put("success", false);
 								}
@@ -479,7 +496,7 @@ public class ChordNode {
 						break;
 					case TRANSFER_DATA_REQUEST:
 						final HashMap<Serializable, Serializable> transfer = new HashMap<Serializable, Serializable>();
-						long nodeId = (long) msg.get("id");
+						long nodeId = (Long) msg.get("id");
 						dataLock.readerLock();
 						for(Map.Entry<Serializable, Serializable> entry: data.entrySet())
 							if(hash(entry.getKey()) <= nodeId)
@@ -514,7 +531,7 @@ public class ChordNode {
 						dataLock.writerLock();
 						Serializable result = data.put(key, value);
 						dataLock.writerUnlock();
-						Message reply = new Message().put("MessageType", MessageType.PUT_RESPONSE).put("result", result);
+						Message reply = new Message().put("MessageType", MessageType.PUT_RESPONSE).put("keyId", hash(key)).put("result", result);
 						manager.sendMessage(id, reply);
 						break;
 					case GET:
@@ -522,7 +539,7 @@ public class ChordNode {
 						dataLock.readerLock();
 						result = data.get(key);
 						dataLock.readerUnlock();
-						reply = new Message().put("MessageType", MessageType.GET_RESPONSE).put("result", result);
+						reply = new Message().put("MessageType", MessageType.GET_RESPONSE).put("keyId", hash(key)).put("result", result);
 						manager.sendMessage(id, reply); 
 						break;
 					default:
@@ -593,7 +610,7 @@ public class ChordNode {
 					e.printStackTrace();
 				}
 				try {
-					Thread.sleep(1500);
+					Thread.sleep(1000);
 				} catch (InterruptedException e) {}
 			}
 		}
@@ -615,68 +632,74 @@ public class ChordNode {
 	 * @throws UnknownHostException 
 	 */
 	public static void main(String[] args) throws Exception{
-		/*HashMap<Integer, String> cluster = new HashMap<Integer, String>();
+		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
 		String ip = Inet4Address.getLocalHost().getHostAddress();
 		cluster.put(0, ip+":12345");
-		cluster.put(1, ip+":12346");
-		cluster.put(2, ip+":12347");
-		cluster.put(3, ip+":12348");
-		cluster.put(4, ip+":12349");
-		cluster.put(5, ip+":15000");
+		cluster.put(1, ip+":22446");
+		cluster.put(2, ip+":32547");
+		cluster.put(3, ip+":42648");
+		cluster.put(4, ip+":52749");
+		cluster.put(5, ip+":40000");
 		ChordNode[] nodes = new ChordNode[5];
 		for(int i=0; i<nodes.length; i++)
 			nodes[i] = new ChordNode(cluster, i);
-		Thread.sleep(5000);
+		Thread.sleep(10000);
 		for(int i=0; i<nodes.length; i++)
 			assert(nodes[i].successor == nodes[next(i, nodes.length)].id): "Got "+nodes[i].successor+", which should be "+nodes[next(i, nodes.length)].id;
 		for(int i=0; i<nodes.length; i++)
 			assert(nodes[i].predecessor == nodes[prev(i, nodes.length)].id): "Got "+nodes[i].predecessor+", which should be "+nodes[prev(i, nodes.length)].id;
-		for(int i=0; i<100; i++){
+		System.out.println("Stabilize successful!");
+		HashMap<Long, Integer> data = new HashMap<Long, Integer>();
+		for(int i=0; i<1000; i++){
 			int index = (int)(Math.random()*(nodes.length));
 			long key = (long)(Math.random()*(1L<<32));
 			int value = (int)(Math.random()*Integer.MAX_VALUE);
 			nodes[index].put(key, value);
-			for(int j=0; j<nodes.length; j++)
-				assert((Integer)nodes[j].get(key) == value);
-			long newValue = (int)(Math.random()*Integer.MAX_VALUE);
+			for(int j=0; j<nodes.length; j++){
+				Serializable result = nodes[j].get(key);
+				assert(result != null && result.equals(value)):"Key is "+key+", got "+result+", which should be "+value;
+			}
+			int newValue = (int)(Math.random()*Integer.MAX_VALUE);
 			index = (int)(Math.random()*(nodes.length));
-			assert((Integer)nodes[index].put(key, newValue) == value);
+			assert(nodes[index].put(key, newValue).equals(value));
+			data.put(key, newValue);
 		}
-		//nodes[0].put(key, value)
-		
-		System.out.println("Pass!");*/
-		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
-		String ip = Inet4Address.getLocalHost().getHostAddress();
-		cluster.put(0, ip+":12345");
-		cluster.put(1, ip+":12346");
-		cluster.put(2, ip+":12347");
-		cluster.put(3, ip+":12348");
-		cluster.put(4, ip+":12349");
-		ChordNode n0 = new ChordNode(cluster, 0);
-		ChordNode n1 = new ChordNode(cluster, 1);
-		ChordNode n2 = new ChordNode(cluster, 2);
-		ChordNode n3 = new ChordNode(cluster, 3);
-		ChordNode n4 = new ChordNode(cluster, 4);
-		try {
-			Thread.sleep(2000);
-		} catch (InterruptedException e1) {
-			e1.printStackTrace();
+		for(int i=0; i<100; i++){
+			int index = (int)(Math.random()*(nodes.length));
+			long key = nodes[2].id + (long)(Math.random()*(nodes[3].id - nodes[2].id));
+			int value = (int)(Math.random()*Integer.MAX_VALUE);
+			nodes[index].put(key, value);
+			data.put(key, value);
 		}
-		System.out.println(n0.fingerTable);
-		System.out.println(n1.fingerTable);
-		System.out.println(n2.fingerTable);
-		System.out.println(n3.fingerTable);
-		System.out.println(n4.fingerTable);
-		assert(n0.successor == n1.id): "Got "+n0.successor+", which should be "+n1.id;
-		assert(n1.successor == n2.id): "Got "+n1.successor+", which should be "+n2.id;
-		assert(n2.successor == n3.id): "Got "+n2.successor+", which should be "+n3.id;
-		assert(n3.successor == n4.id): "Got "+n3.successor+", which should be "+n4.id;
-		assert(n4.successor == n0.id): "Got "+n4.successor+", which should be "+n0.id;
-		assert(n1.predecessor == n0.id): "Got "+n1.predecessor+", which should be "+n0.id;
-		assert(n2.predecessor == n1.id): "Got "+n2.predecessor+", which should be "+n1.id;
-		assert(n3.predecessor == n2.id): "Got "+n3.predecessor+", which should be "+n2.id;
-		assert(n4.predecessor == n3.id): "Got "+n4.predecessor+", which should be "+n3.id;
-		assert(n0.predecessor == n4.id): "Got "+n0.predecessor+", which should be "+n4.id;
+		ChordNode newNode = new ChordNode(cluster, 5);
+		StabilizeThread.sleep(5000);
+		assert(newNode.successor == nodes[3].id);
+		assert(newNode.predecessor == nodes[2].id);
+		System.out.println("New node has been stabilized!");
+		for(Long key: data.keySet()){
+			Integer result = (Integer) newNode.get(key);
+			assert(result.equals(data.get(key))): "Got "+result+", which should be "+data.get(key);
+		}
+		for(int i=0; i<1000; i++){
+			long key = (long)(Math.random()*(1L<<32));
+			int value = (int)(Math.random()*Integer.MAX_VALUE);
+			newNode.put(key, value);
+			for(int j=0; j<nodes.length; j++){
+				Serializable result = nodes[j].get(key);
+				assert(result != null && result.equals(value)):"Key is "+key+", got "+result+", which should be "+value;
+			}
+			int newValue = (int)(Math.random()*Integer.MAX_VALUE);
+			int index = (int)(Math.random()*(nodes.length));
+			assert(nodes[index].put(key, newValue).equals(value));
+			data.put(key, newValue);
+		}
+		for(Long key: data.keySet()){
+			for(int j=0; j<nodes.length; j++){
+				Serializable result = nodes[j].get(key);
+				assert(result != null && result.equals(data.get(key))):"Key is "+key+", got "+result+", which should be "+data.get(key);
+			}
+			assert(newNode.get(key).equals(data.get(key)));
+		}
 		System.out.println("Pass!");
 		
 	}
