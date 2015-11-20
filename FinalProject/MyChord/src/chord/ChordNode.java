@@ -1,6 +1,7 @@
 package chord;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.net.Inet4Address;
 import java.net.UnknownHostException;
 import java.util.HashMap;
@@ -9,6 +10,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
+import backups.WriterReaderLock;
 import communication.CommunicationManager;
 import communication.Message;
 import communication.MessageFilter;
@@ -25,9 +27,11 @@ public class ChordNode {
 	private final ConcurrentHashMap<Long, Integer> id2link;
 	private final FingerTable fingerTable;
 	private long predecessor;
-	private Object predecessorLock = new Object();
+	private final Object predecessorLock = new Object();
 	private long successor;
-	private Object successorLock = new Object();
+	private final Object successorLock = new Object();
+	private final Map<Serializable, Serializable> data;
+	private final WriterReaderLock dataLock = new WriterReaderLock(10);
 	
 	public ChordNode(Map<Integer, String> hosts, int index){
 		if(hosts == null || !hosts.containsKey(index) || hosts.get(index) == null)
@@ -39,6 +43,7 @@ public class ChordNode {
 		predecessor = id;
 		successor = id;
 		fingerTable = new FingerTable(id);
+		data = new HashMap<Serializable, Serializable>();
 		LinkedList<Semaphore> semaphores = new LinkedList<Semaphore>();
 		for(final Map.Entry<Integer, String> entry: hosts.entrySet()){
 			if(entry.getKey() == index) continue;
@@ -54,32 +59,30 @@ public class ChordNode {
 					try {
 						link = manager.connect(ip, port);
 						manager.sendMessageForResponse(link, 
-													   new Message().put("MessageType", MessageType.CONNECTION_REQUEST).
-																	 put("id", id),
-													   new MessageFilter(){
-															@Override
-															public boolean filter(Message msg) {
-																return msg!=null && msg.containsKey("MessageType")
-																		&& msg.get("MessageType")==MessageType.CONNECTION_ACCEPTED;
-															}
-														},
-														5000,
-														new OnMessageReceivedListener(){
-															@Override
-															public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-																long nodeId = hash(entry.getValue());
-																link2id.put(id, nodeId);
-																id2link.put(nodeId, id);
-																manager.setOnMessageReceivedListener(id, new MessageListener());
-																System.out.println("Connected to chord node "+nodeId);
-															}
-															@Override
-															public void OnReceiveError(CommunicationManager manager, int id) {
-																manager.closeConnection(id);
-															}
-														}, true);
-						
-						
+								new Message().put("MessageType", MessageType.CONNECTION_REQUEST).
+								put("id", id),
+								new MessageFilter(){
+									@Override
+									public boolean filter(Message msg) {
+										return msg!=null && msg.containsKey("MessageType")
+												&& msg.get("MessageType")==MessageType.CONNECTION_ACCEPTED;
+									}
+								},
+								5000,
+								new OnMessageReceivedListener(){
+									@Override
+									public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+										long nodeId = hash(entry.getValue());
+										link2id.put(id, nodeId);
+										id2link.put(nodeId, id);
+										manager.setOnMessageReceivedListener(id, new MessageListener());
+										System.out.println("Connected to chord node "+nodeId);
+									}
+									@Override
+									public void OnReceiveError(CommunicationManager manager, int id) {
+										manager.closeConnection(id);
+									}
+								}, true);						
 					} catch (IOException e) {
 						if(link >= 0)
 							manager.closeConnection(link);
@@ -98,6 +101,7 @@ public class ChordNode {
 		manager.waitForConnection(port, new ConnectionListener());
 		try {
 			join();
+			transferData();
 		} catch (OperationFailsException e) {
 			e.printStackTrace();
 		}
@@ -106,8 +110,79 @@ public class ChordNode {
 		System.out.println("Waiting for connection at port "+port);
 	}
 	
-	private long hash(String str){
-		return str.hashCode() & 0x00000000ffffffffL;
+	private long hash(Object obj){
+		return obj.hashCode() & 0x00000000ffffffffL;
+	}
+	
+	public Serializable put(Serializable key, Serializable value) throws OperationFailsException{
+		long successor = find_successor(hash(key));
+		if(successor == id) 
+			return data.put(key, value);
+		final HashMap<String, Object> result = new HashMap<String, Object>();
+		try{
+			manager.sendMessageForResponse(id2link.get(successor), new Message().put("MessageType", MessageType.PUT).
+					put("key", key).
+					put("value", value), 
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg != null && msg.containsKey("MessageType")
+									&& msg.get("MessageType") == MessageType.PUT_RESPONSE;
+						}					
+					}, 5000, 
+					new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							result.put("result", msg.get("result"));
+							result.put("success", true);
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+						}						
+					}, true);
+		} catch(IOException e){
+			System.err.println("Error: Unable to send PUT!");
+			result.put("success", false);
+		}
+		if(!(Boolean)result.get("success"))
+			throw new OperationFailsException();
+		return (Serializable)result.get("result");
+	}
+	
+	public Serializable get(Serializable key) throws OperationFailsException{
+		long successor = find_successor(hash(key));
+		if(successor == id)
+			return data.get(key);
+		final HashMap<String, Object> result = new HashMap<String, Object>();
+		try{
+			manager.sendMessageForResponse(id2link.get(successor), new Message().put("MessageType", MessageType.GET).
+					put("key", key), 
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg != null && msg.containsKey("MessageType")
+									&& msg.get("MessageType") == MessageType.GET_RESPONSE;
+						}					
+					}, 5000, 
+					new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							result.put("result", msg.get("result"));
+							result.put("success", true);
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+						}						
+					}, true);
+		} catch(IOException e){
+			System.err.println("Error: Unable to send PUT!");
+			result.put("success", false);
+		}
+		if(!(Boolean)result.get("success"))
+			throw new OperationFailsException();
+		return (Serializable)result.get("result");
 	}
 	
 	private long find_successor(long target) throws OperationFailsException{
@@ -116,25 +191,25 @@ public class ChordNode {
 		final HashMap<String, Object> result = new HashMap<String, Object>();
 		try {
 			manager.sendMessageForResponse(id2link.get(predecessor), new Message().put("MessageType", MessageType.GET_SUCCESSOR), 
-											new MessageFilter(){
-												@Override
-												public boolean filter(Message msg) {
-													return msg!=null && msg.containsKey("MessageType")
-															&& msg.get("MessageType") == MessageType.GET_SUCCESSOR_RESPONSE;
-												}
-											}, 5000, 
-											new OnMessageReceivedListener(){
-												@Override
-												public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-													result.put("result", msg.get("result"));
-													result.put("success", true);
-												}
-												@Override
-												public void OnReceiveError(CommunicationManager manager, int id) {
-													result.put("success", false);
-													System.err.println("Unable to receive GET_SUCCESSOR_RESPONSE!");
-												}		
-											}, true);
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg!=null && msg.containsKey("MessageType")
+									&& msg.get("MessageType") == MessageType.GET_SUCCESSOR_RESPONSE;
+						}
+					}, 5000, 
+					new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							result.put("result", msg.get("result"));
+							result.put("success", true);
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+							System.err.println("Unable to receive GET_SUCCESSOR_RESPONSE!");
+						}		
+					}, true);
 		} catch (IOException e) {
 			System.err.println("Unable to send GET_SUCCESSOR to "+predecessor);
 			throw new OperationFailsException("Unable to send GET_SUCCESSOR to "+predecessor);
@@ -162,30 +237,28 @@ public class ChordNode {
 		final HashMap<String, Object> result = new HashMap<String, Object>();
 		try {
 			manager.sendMessageForResponse(id2link.get(queryNode), msg,
-										   new MessageFilter(){
-											@Override
-											public boolean filter(Message msg) {
-												return msg!=null && msg.containsKey("MessageType")
-														&& msg.get("MessageType") == MessageType.FIND_PREDECESSOR_RESPONSE;
-												}
-											}, 5000, 
-											new OnMessageReceivedListener(){
-												@Override
-												public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-													if((Boolean)msg.get("success")){
-														result.put("result", msg.get("result"));
-														result.put("success", true);
-													}else
-														result.put("success", false);
-												}
-
-												@Override
-												public void OnReceiveError(CommunicationManager manager, int id) {
-													result.put("success", false);
-													System.err.println("Unable to receive FIND_PREDECESSOR_RESPONSE!");
-												}
-												
-											}, true);
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg!=null && msg.containsKey("MessageType")
+									&& msg.get("MessageType") == MessageType.FIND_PREDECESSOR_RESPONSE;
+						}
+					}, 5000, 
+					new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							if((Boolean)msg.get("success")){
+								result.put("result", msg.get("result"));
+								result.put("success", true);
+							}else
+								result.put("success", false);
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+							System.err.println("Unable to receive FIND_PREDECESSOR_RESPONSE!");
+						}
+					}, true);
 		} catch (IOException e) {
 			System.err.println("Unable to send FIND_PREDECESSOR to "+queryNode);
 			throw new OperationFailsException("Unable to send FIND_PREDECESSOR to "+queryNode);
@@ -237,6 +310,50 @@ public class ChordNode {
 				return;
 		}
 		throw new OperationFailsException("Unable to join!");
+	}
+	
+	private void transferData() throws OperationFailsException{
+		if(successor == id) return;
+		final HashMap<String, Object> result = new HashMap<String, Object>();
+		try {
+			manager.sendMessageForResponse(id2link.get(successor), new Message().put("MessageType", MessageType.TRANSFER_DATA_REQUEST).
+					put("id", id), 
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg != null && msg.containsKey("MessageType") && 
+									msg.get("MessageType") == MessageType.TRANSFER_DATA_RESPONSE;
+						}
+					}, 5000, 
+					new OnMessageReceivedListener(){
+						@SuppressWarnings("unchecked")
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {			
+							HashMap<Serializable, Serializable> response = (HashMap<Serializable, Serializable>) msg.get("result");
+							dataLock.writerLock();
+							for(Map.Entry<Serializable, Serializable> entry: response.entrySet())
+								data.put(entry.getKey(), entry.getValue());
+							dataLock.writerUnlock();
+							try {
+								manager.sendMessage(id, new Message().put("MessageType", MessageType.TRANSFER_DATA_ACK));
+							} catch (IOException e) {
+								result.put("success", false);
+								System.err.println("Unable to send back TRANSFER_DATA_ACK!");
+								return;
+							}
+							result.put("success", true);
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+							System.err.println("Unable to receive TRANSFER_DATA_RESPONSE!!");
+						}												
+					}, true);
+		} catch (IOException e) {
+			result.put("success", false);
+		}
+		if(!(Boolean)result.get("success"))
+			throw new OperationFailsException();
 	}
 	
 	private void stabilize() throws OperationFailsException{
@@ -311,7 +428,7 @@ public class ChordNode {
 				switch((MessageType)msg.get("MessageType")){
 					case GET_PREDECESSOR:
 						manager.sendMessage(id, new Message().put("MessageType", MessageType.GET_PREDECESSOR_RESPONSE).
-								  put("result", predecessor));
+								  							  put("result", predecessor));
 						break;
 					case FIND_PREDECESSOR:
 						new Thread(){
@@ -359,6 +476,54 @@ public class ChordNode {
 						break;
 					case NOTIFY:
 						notifyFromPredecessor((Long)msg.get("target"));
+						break;
+					case TRANSFER_DATA_REQUEST:
+						final HashMap<Serializable, Serializable> transfer = new HashMap<Serializable, Serializable>();
+						long nodeId = (long) msg.get("id");
+						dataLock.readerLock();
+						for(Map.Entry<Serializable, Serializable> entry: data.entrySet())
+							if(hash(entry.getKey()) <= nodeId)
+								transfer.put(entry.getKey(), entry.getValue());
+						dataLock.readerUnlock();
+						manager.sendMessageForResponse(id, new Message().put("MessageType", MessageType.TRANSFER_DATA_RESPONSE).
+								put("result", transfer),
+								new MessageFilter(){
+									@Override
+									public boolean filter(Message msg) {
+										return msg != null && msg.containsKey("MessageType")
+												&& msg.get("MessageType") == MessageType.TRANSFER_DATA_ACK;
+									}
+								}, 5000, 
+								new OnMessageReceivedListener(){
+									@Override
+									public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+										dataLock.writerLock();
+										for(Map.Entry<Serializable, Serializable> entry: transfer.entrySet())
+											data.remove(entry.getKey());
+										dataLock.writerUnlock();
+									}
+									@Override
+									public void OnReceiveError(CommunicationManager manager, int id) {
+										System.err.println("Unable to receive TRANSFER_DATA_ACK!");
+									}
+								}, false);
+						break;
+					case PUT:
+						Serializable key = msg.get("key");
+						Serializable value = msg.get("value");
+						dataLock.writerLock();
+						Serializable result = data.put(key, value);
+						dataLock.writerUnlock();
+						Message reply = new Message().put("MessageType", MessageType.PUT_RESPONSE).put("result", result);
+						manager.sendMessage(id, reply);
+						break;
+					case GET:
+						key = msg.get("key");
+						dataLock.readerLock();
+						result = data.get(key);
+						dataLock.readerUnlock();
+						reply = new Message().put("MessageType", MessageType.GET_RESPONSE).put("result", result);
+						manager.sendMessage(id, reply); 
 						break;
 					default:
 						break;
@@ -434,12 +599,52 @@ public class ChordNode {
 		}
 	}
 	
+	private static int next(int index, int len){
+		if(index == len-1) return 0;
+		return index+1;
+	}
+	
+	private static int prev(int index, int len){
+		if(index == 0) return len-1;
+		return index-1;
+	}
+	
 	/**
 	 * Test
 	 * @param args
 	 * @throws UnknownHostException 
 	 */
-	public static void main(String[] args) throws UnknownHostException{
+	public static void main(String[] args) throws Exception{
+		/*HashMap<Integer, String> cluster = new HashMap<Integer, String>();
+		String ip = Inet4Address.getLocalHost().getHostAddress();
+		cluster.put(0, ip+":12345");
+		cluster.put(1, ip+":12346");
+		cluster.put(2, ip+":12347");
+		cluster.put(3, ip+":12348");
+		cluster.put(4, ip+":12349");
+		cluster.put(5, ip+":15000");
+		ChordNode[] nodes = new ChordNode[5];
+		for(int i=0; i<nodes.length; i++)
+			nodes[i] = new ChordNode(cluster, i);
+		Thread.sleep(5000);
+		for(int i=0; i<nodes.length; i++)
+			assert(nodes[i].successor == nodes[next(i, nodes.length)].id): "Got "+nodes[i].successor+", which should be "+nodes[next(i, nodes.length)].id;
+		for(int i=0; i<nodes.length; i++)
+			assert(nodes[i].predecessor == nodes[prev(i, nodes.length)].id): "Got "+nodes[i].predecessor+", which should be "+nodes[prev(i, nodes.length)].id;
+		for(int i=0; i<100; i++){
+			int index = (int)(Math.random()*(nodes.length));
+			long key = (long)(Math.random()*(1L<<32));
+			int value = (int)(Math.random()*Integer.MAX_VALUE);
+			nodes[index].put(key, value);
+			for(int j=0; j<nodes.length; j++)
+				assert((Integer)nodes[j].get(key) == value);
+			long newValue = (int)(Math.random()*Integer.MAX_VALUE);
+			index = (int)(Math.random()*(nodes.length));
+			assert((Integer)nodes[index].put(key, newValue) == value);
+		}
+		//nodes[0].put(key, value)
+		
+		System.out.println("Pass!");*/
 		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
 		String ip = Inet4Address.getLocalHost().getHostAddress();
 		cluster.put(0, ip+":12345");
