@@ -134,7 +134,7 @@ public class ChordNode {
 	}
 	
 	public Serializable put(Serializable key, Serializable value) throws OperationFailsException{
-		long keyId = hash(key);
+		final long keyId = hash(key);
 		long successor = find_successor(keyId);
 		if(successor == id){
 			dataLock.writerLock();
@@ -176,7 +176,7 @@ public class ChordNode {
 	}
 	
 	public Serializable get(Serializable key) throws OperationFailsException{
-		long keyId = hash(key);
+		final long keyId = hash(key);
 		long successor = find_successor(keyId);
 		if(successor == id){
 			dataLock.readerLock();
@@ -217,7 +217,7 @@ public class ChordNode {
 	}
 	
 	public Serializable remove(Serializable key) throws OperationFailsException{
-		long keyId = hash(key);
+		final long keyId = hash(key);
 		long successor = find_successor(keyId);
 		if(successor == id){
 			dataLock.writerLock();
@@ -302,7 +302,7 @@ public class ChordNode {
 	}
 	
 	private long help_other_find_predecessor(Message msg) throws OperationFailsException{
-		long target = (Long) msg.get("target");
+		final long target = (Long) msg.get("target");
 		if(IDRing.isBetween(target, id, successor) || successor == target) return id;
 		if(!msg.containsKey("origin"))
 			msg.put("origin", id);
@@ -704,7 +704,7 @@ public class ChordNode {
 					case RECOVER_DATA:
 						reply = new Message().put("MessageType", MessageType.RECOVER_DATA_RESPONSE);
 						try{
-							recoverDataOfNode((long) msg.get("target"));
+							recoverDataOfNode((Long) msg.get("target"));
 							synchronized(predecessorLock){
 								predecessor = link2id.get(id);
 							}
