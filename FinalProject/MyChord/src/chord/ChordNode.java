@@ -1,9 +1,11 @@
 package chord;
 
+import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.Serializable;
 import java.net.Inet4Address;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -207,6 +209,47 @@ public class ChordNode {
 					}, true);
 		} catch(IOException e){
 			System.err.println("Error: Unable to send GET!");
+			result.put("success", false);
+		}
+		if(!(Boolean)result.get("success"))
+			throw new OperationFailsException();
+		return (Serializable)result.get("result");
+	}
+	
+	public Serializable remove(Serializable key) throws OperationFailsException{
+		long keyId = hash(key);
+		long successor = find_successor(keyId);
+		if(successor == id){
+			dataLock.writerLock();
+			Serializable ret = data.remove(key);
+			dataLock.writerUnlock();
+			return ret;
+		}
+		final HashMap<String, Object> result = new HashMap<String, Object>();
+		try{
+			manager.sendMessageForResponse(id2link.get(successor), new Message().put("MessageType", MessageType.REMOVE).
+					put("key", key), 
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg != null && msg.containsKey("MessageType")
+									&& msg.get("MessageType") == MessageType.REMOVE_RESPONSE
+									&& msg.get("keyId").equals(keyId);
+						}					
+					}, 5000, 
+					new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							result.put("result", msg.get("result"));
+							result.put("success", true);
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+						}						
+					}, true);
+		} catch(IOException e){
+			System.err.println("Error: Unable to send REMOVE!");
 			result.put("success", false);
 		}
 		if(!(Boolean)result.get("success"))
@@ -537,6 +580,11 @@ public class ChordNode {
 		fingerTable.setSuccessor(i, find_successor(fingerTable.getStart(i)));
 	}
 	
+	private static int next(int index, int len){
+		if(index == len-1) return 0;
+		return index+1;
+	}
+	
 	private class MessageListener implements OnMessageReceivedListener{
 
 		@Override
@@ -645,6 +693,14 @@ public class ChordNode {
 						reply = new Message().put("MessageType", MessageType.GET_RESPONSE).put("keyId", hash(key)).put("result", result);
 						manager.sendMessage(id, reply); 
 						break;
+					case REMOVE:
+						key = msg.get("key");
+						dataLock.writerLock();
+						result = data.remove(key);
+						dataLock.writerUnlock();
+						reply = new Message().put("MessageType", MessageType.REMOVE_RESPONSE).put("keyId", hash(key)).put("result", result);
+						manager.sendMessage(id, reply);
+						break;
 					case RECOVER_DATA:
 						reply = new Message().put("MessageType", MessageType.RECOVER_DATA_RESPONSE);
 						try{
@@ -747,10 +803,7 @@ public class ChordNode {
 	//-----------------------------------------------------------------------------------------------
 	//Following code is for testing purpose only
 	
-	private static int next(int index, int len){
-		if(index == len-1) return 0;
-		return index+1;
-	}
+	
 	
 	private static int prev(int index, int len){
 		if(index == 0) return len-1;
@@ -785,12 +838,8 @@ public class ChordNode {
 		}
 	}
 	
-	/**
-	 * Test
-	 * @param args
-	 * @throws UnknownHostException 
-	 */
-	public static void main(String[] args) throws Exception{
+	//Test functions
+	public static void test() throws Exception{
 		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
 		String ip = Inet4Address.getLocalHost().getHostAddress();
 		cluster.put(0, ip+":12345");
@@ -918,7 +967,62 @@ public class ChordNode {
 			}
 		}
 		System.out.println("Pass!");
-		
+	}
+	
+	
+	public static void main(String[] args) throws Exception{
+		String chordNodesInfo = args[0];
+		String repositoryNodesInfo = args[1];
+		int index = Integer.parseInt(args[2]);
+		HashMap<Integer, String> chords = new HashMap<Integer, String>();
+		HashMap<Integer, String> repositories = new HashMap<Integer, String>();
+		String line = null;
+		int i = 0;
+		BufferedReader chordReader = new BufferedReader(new InputStreamReader(new FileInputStream(chordNodesInfo)));
+		try {
+			while((line = chordReader.readLine()) != null){
+				chords.put(i, line);
+				i++;
+			}
+		} catch (IOException e) {
+			throw e;
+		} finally{
+			chordReader.close();
+		}
+		i = 0;
+		BufferedReader repoReader = new BufferedReader(new InputStreamReader(new FileInputStream(repositoryNodesInfo)));
+		try {
+			while((line = repoReader.readLine()) != null){
+				repositories.put(i, line);
+				i++;
+			}
+		} catch (IOException e) {
+			throw e;
+		} finally{
+			repoReader.close();
+		}
+		ChordNode chordNode = new ChordNode(chords, index, repositories, new IntegerCoder());
+		BufferedReader commandReader = new BufferedReader(new InputStreamReader(System.in));
+		while((line = commandReader.readLine()) != null){
+			try {
+				String[] parts = line.split(" ");
+				String cmd = parts[0];
+				if(cmd.equals("put")){
+					String key = parts[1];
+					int value = Integer.parseInt(parts[2]);
+					chordNode.put(key, value);
+				}else if(cmd.equals("get")){
+					String key = parts[1];
+					System.out.println(chordNode.get(key));
+				}else if(cmd.equals("remove")){
+					String key = parts[1];
+					System.out.println(chordNode.remove(key));
+				}
+			} catch (Exception e) {
+				System.err.println("Operation fails! Please try again!");
+				e.printStackTrace();
+			}
+		}
 	}
 
 }
