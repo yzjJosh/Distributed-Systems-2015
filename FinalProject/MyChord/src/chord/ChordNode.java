@@ -883,8 +883,6 @@ public class ChordNode {
 		assert(nodes[3].predecessor == nodes[2].id);
 		assert(nodes[1].successorOfSuccessor == nodes[3].id);
 		assert(nodes[2].successorOfSuccessor == nodes[4].id);
-		Map<Serializable, Serializable> test = new FusionBackupHashMap<Serializable, Serializable>(backupNodes, 5, new IntegerCoder());
-		assert(test.size() == 0);
 		for(int i=0; i<nodes.length; i++){
 			assert(nodes[i].id2link.size() == 4);
 			assert(nodes[i].link2id.size() == 4);
@@ -892,6 +890,29 @@ public class ChordNode {
 		System.out.println("Testing recovery result");
 		for(Long key: data.keySet()){
 			for(int j=0; j<nodes.length; j++){
+				Serializable result = nodes[j].get(key);
+				assert(result != null && result.equals(data.get(key))):"Key is "+key+", got "+result+", which should be "+data.get(key);
+			}
+		}
+		System.out.println("Simulation node crash on node "+nodes[1].id);
+		((FusionBackupHashMap<Serializable, Serializable>)nodes[1].data).disConnect();
+		nodes[1].manager.close();
+		nodes[1].stabilizeThread.exit();
+		System.out.println("Waiting for recovery...");
+		Thread.sleep(10000);
+		assert(nodes[0].successor == nodes[2].id);
+		assert(nodes[2].predecessor == nodes[0].id);
+		assert(nodes[0].successorOfSuccessor == nodes[3].id);
+		assert(nodes[4].successorOfSuccessor == nodes[2].id);
+		for(int i=0; i<nodes.length; i++){
+			if(i == 1) continue;
+			assert(nodes[i].id2link.size() == 3): "Got "+nodes[i].id2link.size();
+			assert(nodes[i].link2id.size() == 3): "Got "+nodes[i].link2id.size();
+		}
+		System.out.println("Testing recovery result");
+		for(Long key: data.keySet()){
+			for(int j=0; j<nodes.length; j++){
+				if(j == 1) continue;
 				Serializable result = nodes[j].get(key);
 				assert(result != null && result.equals(data.get(key))):"Key is "+key+", got "+result+", which should be "+data.get(key);
 			}
