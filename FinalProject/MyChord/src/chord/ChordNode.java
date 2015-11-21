@@ -4,19 +4,23 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.net.Inet4Address;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 
+import backups.FusedRepository;
 import backups.WriterReaderLock;
 import communication.CommunicationManager;
 import communication.Message;
 import communication.MessageFilter;
 import communication.OnConnectionListener;
 import communication.OnMessageReceivedListener;
-import constants.MessageType;
+import dataStructures.Coder;
+import dataStructures.FusionBackupHashMap;
+import exceptions.DecodeException;
 import exceptions.OperationFailsException;
 
 public class ChordNode {
@@ -25,27 +29,39 @@ public class ChordNode {
 	private final long id;
 	private final ConcurrentHashMap<Integer, Long> link2id;
 	private final ConcurrentHashMap<Long, Integer> id2link;
+	private final HashMap<Long, Integer> id2primary;
 	private final FingerTable fingerTable;
 	private long predecessor;
 	private final Object predecessorLock = new Object();
 	private long successor;
 	private final Object successorLock = new Object();
+	private long successorOfSuccessor;
+	private final Object successorOfSuccessorLock = new Object();
 	private final Map<Serializable, Serializable> data;
 	private final WriterReaderLock dataLock = new WriterReaderLock(10);
+	private final Map<Integer, String> backupNodesInfo;
+	private final Coder<Serializable> coder;
+	private final StabilizeThread stabilizeThread;
 	
-	public ChordNode(Map<Integer, String> hosts, int index){
-		if(hosts == null || !hosts.containsKey(index) || hosts.get(index) == null)
+	
+	public ChordNode(Map<Integer, String> chordNodesInfo, int index, Map<Integer, String> backupNodesInfo, Coder<Serializable> coder){
+		if(chordNodesInfo == null || !chordNodesInfo.containsKey(index) || chordNodesInfo.get(index) == null)
 			throw new IllegalArgumentException();
 		manager = new CommunicationManager();
 		link2id = new ConcurrentHashMap<Integer, Long>();
 		id2link = new ConcurrentHashMap<Long, Integer>();
-		id = hash(hosts.get(index));
+		id2primary = new HashMap<Long, Integer>();
+		this.backupNodesInfo = backupNodesInfo;
+		id = hash(chordNodesInfo.get(index));
 		predecessor = id;
 		successor = id;
+		successorOfSuccessor = id;
 		fingerTable = new FingerTable(id);
-		data = new HashMap<Serializable, Serializable>();
+		data = new FusionBackupHashMap<Serializable, Serializable>(backupNodesInfo, index, coder);
+		this.coder = coder;
 		LinkedList<Semaphore> semaphores = new LinkedList<Semaphore>();
-		for(final Map.Entry<Integer, String> entry: hosts.entrySet()){
+		for(final Map.Entry<Integer, String> entry: chordNodesInfo.entrySet()){
+			id2primary.put(hash(entry.getValue()), entry.getKey());
 			if(entry.getKey() == index) continue;
 			String[] temp = entry.getValue().split(":");
 			final String ip = temp[0];
@@ -103,8 +119,9 @@ public class ChordNode {
 		} catch (OperationFailsException e) {
 			e.printStackTrace();
 		}
-		new StabilizeThread().start();
-		int port = Integer.parseInt(hosts.get(index).split(":")[1]);
+		stabilizeThread = new StabilizeThread();
+		stabilizeThread.start();
+		int port = Integer.parseInt(chordNodesInfo.get(index).split(":")[1]);
 		manager.waitForConnection(port, new ConnectionListener());
 		System.out.println("ChordNode starts, id="+id);
 		System.out.println("Waiting for connection at port "+port);
@@ -197,12 +214,13 @@ public class ChordNode {
 		return (Serializable)result.get("result");
 	}
 	
-	private long find_successor(long target) throws OperationFailsException{
-		long predecessor = find_predecessor(target);
-		if(predecessor == id) return successor;
+	private long get_successor(long node) throws OperationFailsException{
+		if(node == id) return successor;
+		if(!id2link.containsKey(node))
+			throw new OperationFailsException(node+" is not the id of a connected chord node!");
 		final HashMap<String, Object> result = new HashMap<String, Object>();
 		try {
-			manager.sendMessageForResponse(id2link.get(predecessor), new Message().put("MessageType", MessageType.GET_SUCCESSOR), 
+			manager.sendMessageForResponse(id2link.get(node), new Message().put("MessageType", MessageType.GET_SUCCESSOR), 
 					new MessageFilter(){
 						@Override
 						public boolean filter(Message msg) {
@@ -223,12 +241,16 @@ public class ChordNode {
 						}		
 					}, true);
 		} catch (IOException e) {
-			System.err.println("Unable to send GET_SUCCESSOR to "+predecessor);
-			throw new OperationFailsException("Unable to send GET_SUCCESSOR to "+predecessor);
+			System.err.println("Unable to send GET_SUCCESSOR to "+node);
+			throw new OperationFailsException("Unable to send GET_SUCCESSOR to "+node);
 		}
 		if(!(Boolean)result.get("success"))
 			throw new OperationFailsException();
 		return (Long)result.get("result");
+	}
+	
+	private long find_successor(long target) throws OperationFailsException{
+		return get_successor(find_predecessor(target));
 	}
 	
 	private long find_predecessor(long target) throws OperationFailsException{
@@ -272,7 +294,7 @@ public class ChordNode {
 							System.err.println("Unable to receive FIND_PREDECESSOR_RESPONSE!");
 						}
 					}, true);
-		} catch (IOException e) {
+		} catch (Exception e) {
 			System.err.println("Unable to send FIND_PREDECESSOR to "+queryNode);
 			throw new OperationFailsException("Unable to send FIND_PREDECESSOR to "+queryNode);
 		}
@@ -286,6 +308,7 @@ public class ChordNode {
 			predecessor = -1;
 		}
 		if(link2id.size() == 0) return;
+		boolean success = false;
 		for(int link: link2id.keySet()){
 			final HashMap<String, Object> result = new HashMap<String, Object>();
 			try {
@@ -320,10 +343,17 @@ public class ChordNode {
 			} catch (IOException e) {
 				result.put("success", false);
 			}
-			if((Boolean)result.get("success"))
-				return;
+			if((Boolean)result.get("success")){
+				success = true;
+				break;
+			}
 		}
-		throw new OperationFailsException("Unable to join!");
+		if(!success)
+			throw new OperationFailsException("Unable to join!");
+		long nextSuccessor = get_successor(successor);
+		synchronized(successorOfSuccessorLock){
+			successorOfSuccessor = nextSuccessor;
+		}
 	}
 	
 	private void transferData() throws OperationFailsException{
@@ -338,7 +368,7 @@ public class ChordNode {
 							return msg != null && msg.containsKey("MessageType") && 
 									msg.get("MessageType") == MessageType.TRANSFER_DATA_RESPONSE;
 						}
-					}, 5000, 
+					}, 10000, 
 					new OnMessageReceivedListener(){
 						@SuppressWarnings("unchecked")
 						@Override
@@ -371,6 +401,60 @@ public class ChordNode {
 			throw new OperationFailsException();
 	}
 	
+	private void recoverDataOfNode(long nodeId) throws OperationFailsException{
+		if(nodeId == id) return;
+		if(!id2primary.containsKey(nodeId))
+			throw new OperationFailsException(nodeId+" is not a valid node id!");
+		int primary = id2primary.get(nodeId);
+		System.out.println("Recovering data for "+nodeId+"...");
+		FusionBackupHashMap<Serializable, Serializable> recover = new FusionBackupHashMap<Serializable, Serializable>(backupNodesInfo, primary, coder);
+		System.out.println("Successfully recovered "+recover.size()+" entries!");
+		dataLock.writerLock();
+		for(Map.Entry<Serializable, Serializable> entry: recover.entrySet())
+			data.put(entry.getKey(), entry.getValue());
+		dataLock.writerUnlock();
+		System.out.println("Updating repository...");
+		recover.clear();
+		System.out.println("Repository updated!");
+		recover.disConnect();
+		System.out.println("Recover ends!");
+	}
+	
+	private void ask_other_to_recover_data(long recoveredNode, long operationNode) throws OperationFailsException{
+		if(operationNode == id){
+			recoverDataOfNode(recoveredNode);
+			return;
+		}
+		final HashMap<String, Object> result = new HashMap<String, Object>();
+		try{
+			manager.sendMessageForResponse(id2link.get(operationNode), new Message().
+					put("MessageType", MessageType.RECOVER_DATA).
+					put("target", recoveredNode), 
+					new MessageFilter(){
+						@Override
+						public boolean filter(Message msg) {
+							return msg != null && msg.containsKey("MessageType")
+									&& msg.get("MessageType") == MessageType.RECOVER_DATA_RESPONSE;
+						}
+					}, 10000, 
+					new OnMessageReceivedListener(){
+						@Override
+						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+							result.put("success", msg.get("success"));
+						}
+						@Override
+						public void OnReceiveError(CommunicationManager manager, int id) {
+							result.put("success", false);
+						}
+					}, true);
+		}catch (IOException e){
+			System.err.println("Error: Unable to send RECOVER_DATA to "+operationNode);
+			throw new OperationFailsException("Error: Unable to send RECOVER_DATA to "+operationNode);
+		}
+		if(!(Boolean)result.get("success"))
+			throw new OperationFailsException();
+	}
+	
 	private void stabilize() throws OperationFailsException{
 		final HashMap<String, Object> result = new HashMap<String, Object>();
 		long x = predecessor;
@@ -395,12 +479,18 @@ public class ChordNode {
 							public void OnReceiveError(CommunicationManager manager, int id) {
 								System.err.println("Error: Unable to receive GET_PREDECESSOR_RESPONSE!");
 								result.put("success", false);
-							}
-							
+							}							
 						}, true);
-			} catch (IOException e) {
+			} catch (Exception e) {
 				System.err.println("Error: Unable to send GET_PREDECESSOR!");
-				throw new OperationFailsException("Unable to send GET_PREDECESSOR");
+				System.out.println("Node "+id+": Successor "+successor+" crashes! Change successor into "+successorOfSuccessor+"!");
+				ask_other_to_recover_data(successor, successorOfSuccessor);
+				synchronized(successorLock){
+					successor = successorOfSuccessor;
+					fingerTable.setSuccessor(0, successor);
+				}
+				result.put("success", true);
+				result.put("result", id);
 			}
 			if(!(Boolean)result.get("success"))
 				throw new OperationFailsException("Error: Unable to receive GET_PREDECESSOR_RESPONSE!");
@@ -416,10 +506,15 @@ public class ChordNode {
 				manager.sendMessage(id2link.get(successor), new Message().
 						put("MessageType", MessageType.NOTIFY).
 						put("target", id));
-			} catch (IOException e) {
-				System.err.println("Unable to send NOTIFY!");
+			} catch (Exception e) {
+				e.printStackTrace();
+				System.err.println("Node "+id+": Unable to send NOTIFY to "+successor+"!");
 				throw new OperationFailsException("Unable to send NOTIFY!");
 			}
+		long nextSuccessor = get_successor(successor);
+		synchronized(successorOfSuccessorLock){
+			successorOfSuccessor = nextSuccessor;
+		}
 	}
 	
 	private void notifyFromPredecessor(long target){
@@ -542,6 +637,16 @@ public class ChordNode {
 						reply = new Message().put("MessageType", MessageType.GET_RESPONSE).put("keyId", hash(key)).put("result", result);
 						manager.sendMessage(id, reply); 
 						break;
+					case RECOVER_DATA:
+						reply = new Message().put("MessageType", MessageType.RECOVER_DATA_RESPONSE);
+						try{
+							recoverDataOfNode((long) msg.get("target"));
+							reply.put("success", true);
+						}catch(OperationFailsException e){
+							reply.put("success", false);
+						}
+						manager.sendMessage(id, reply); 
+						break;
 					default:
 						break;
 				}
@@ -554,6 +659,8 @@ public class ChordNode {
 		@Override
 		public void OnReceiveError(CommunicationManager manager, int id) {
 			System.err.println("Error occurs when receiving message!");
+			long nodeId = link2id.remove(id);
+			id2link.remove(nodeId);
 			manager.closeConnection(id);
 		}
 		
@@ -600,21 +707,33 @@ public class ChordNode {
 	
 	private class StabilizeThread extends Thread{
 		
+		private boolean exit = false;
+		
+		public void exit(){
+			exit = true;
+			this.interrupt();
+		}
+		
 		@Override
 		public void run(){
-			while(true){
+			while(!exit){
 				try {
 					stabilize();
+					if(exit) return;
 					fix_fingers();
 				} catch (OperationFailsException e) {
 					e.printStackTrace();
 				}
+				if(exit) return;
 				try {
 					Thread.sleep(1000);
 				} catch (InterruptedException e) {}
 			}
 		}
 	}
+	
+	//-----------------------------------------------------------------------------------------------
+	//Following code is for testing purpose only
 	
 	private static int next(int index, int len){
 		if(index == len-1) return 0;
@@ -624,6 +743,34 @@ public class ChordNode {
 	private static int prev(int index, int len){
 		if(index == 0) return len-1;
 		return index-1;
+	}
+	
+	private static class IntegerCoder implements Coder<Serializable>{
+
+		private int toInt(double d){
+			return (int)Math.round(d);
+		}
+
+		@Override
+		public ArrayList<Double> encode(Serializable target) {
+			ArrayList<Double> ret = new ArrayList<Double>();
+			if(target == null){
+				ret.add(1.0);
+				ret.add(1.0);
+			}else
+				ret.add((double)(((Integer)target).intValue()));
+			return ret;
+		}
+
+
+		@Override
+		public Serializable decode(ArrayList<Double> source) {
+			if(source == null || source.size() == 0)
+				throw new DecodeException("Unable to decode from empty list!");
+			if(source.size()>1 && toInt(source.get(0)) == 1 && toInt(source.get(1)) == 1)
+				return null;
+			return toInt(source.get(0));
+		}
 	}
 	
 	/**
@@ -640,12 +787,22 @@ public class ChordNode {
 		cluster.put(3, ip+":42648");
 		cluster.put(4, ip+":52749");
 		cluster.put(5, ip+":40000");
+		HashMap<Integer, String> backupNodes = new HashMap<Integer, String>();
+		backupNodes.put(0, ip+":13579");
+		backupNodes.put(1, ip+":13580");
+		backupNodes.put(2, ip+":13581");
+		FusedRepository[] repositories = new FusedRepository[3];
+		for(int i=0; i<repositories.length; i++)
+			repositories[i] = new FusedRepository(2, cluster.size(), i, backupNodes);
 		ChordNode[] nodes = new ChordNode[5];
 		for(int i=0; i<nodes.length; i++)
-			nodes[i] = new ChordNode(cluster, i);
+			nodes[i] = new ChordNode(cluster, i, backupNodes, new IntegerCoder());
 		Thread.sleep(10000);
-		for(int i=0; i<nodes.length; i++)
+		for(int i=0; i<nodes.length; i++){
 			assert(nodes[i].successor == nodes[next(i, nodes.length)].id): "Got "+nodes[i].successor+", which should be "+nodes[next(i, nodes.length)].id;
+			assert(nodes[i].successorOfSuccessor == nodes[next(next(i, nodes.length), nodes.length)].id): 
+				"Got "+nodes[i].successorOfSuccessor+", which should be "+nodes[next(next(i, nodes.length), nodes.length)].id;
+		}
 		for(int i=0; i<nodes.length; i++)
 			assert(nodes[i].predecessor == nodes[prev(i, nodes.length)].id): "Got "+nodes[i].predecessor+", which should be "+nodes[prev(i, nodes.length)].id;
 		System.out.println("Stabilize successful!");
@@ -671,10 +828,14 @@ public class ChordNode {
 			nodes[index].put(key, value);
 			data.put(key, value);
 		}
-		ChordNode newNode = new ChordNode(cluster, 5);
+		ChordNode newNode = new ChordNode(cluster, 5, backupNodes, new IntegerCoder());
 		StabilizeThread.sleep(5000);
 		assert(newNode.successor == nodes[3].id);
+		assert(newNode.successorOfSuccessor == nodes[4].id);
 		assert(newNode.predecessor == nodes[2].id);
+		assert(nodes[3].predecessor == newNode.id);
+		assert(nodes[2].successor == newNode.id);
+		assert(nodes[1].successorOfSuccessor == newNode.id);
 		System.out.println("New node has been stabilized!");
 		for(Long key: data.keySet()){
 			Integer result = (Integer) newNode.get(key);
@@ -693,6 +854,20 @@ public class ChordNode {
 			assert(nodes[index].put(key, newValue).equals(value));
 			data.put(key, newValue);
 		}
+		for(Long key: data.keySet()){
+			for(int j=0; j<nodes.length; j++){
+				Serializable result = nodes[j].get(key);
+				assert(result != null && result.equals(data.get(key))):"Key is "+key+", got "+result+", which should be "+data.get(key);
+			}
+			assert(newNode.get(key).equals(data.get(key)));
+		}
+		System.out.println("Simulation node crash on node "+newNode.id);
+		((FusionBackupHashMap<Serializable, Serializable>)newNode.data).disConnect();
+		newNode.manager.close();
+		newNode.stabilizeThread.exit();
+		System.out.println("Waiting for recovery...");
+		Thread.sleep(10000);
+		System.out.println("Testing recovery result");
 		for(Long key: data.keySet()){
 			for(int j=0; j<nodes.length; j++){
 				Serializable result = nodes[j].get(key);

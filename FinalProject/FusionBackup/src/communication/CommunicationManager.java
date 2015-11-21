@@ -18,8 +18,9 @@ public class CommunicationManager {
 	
 	private TreeSet<Integer> idSet = new TreeSet<Integer>();
 	private int nextId = 0;
-	private Object idLock = new Object();
-	private HashMap<Integer, ConnectionThread> connections = new HashMap<Integer, ConnectionThread>();
+	private final Object idLock = new Object();
+	private final HashMap<Integer, ConnectionThread> connections = new HashMap<Integer, ConnectionThread>();
+	private final LinkedList<WaitConnectionThread> waitingConnectionThreads = new LinkedList<WaitConnectionThread>();
 	
 	
 	/**
@@ -28,7 +29,11 @@ public class CommunicationManager {
 	 * @param connectionlistener the listener which listens to the connection event
 	 */
 	public void waitForConnection(int port, OnConnectionListener connectionlistener){
-		new WaitConnectionThread(port, connectionlistener).start();
+		WaitConnectionThread thread = new WaitConnectionThread(port, connectionlistener);
+		thread.start();
+		synchronized(waitingConnectionThreads){
+			waitingConnectionThreads.add(thread);
+		}
 	}
 	
 	/**
@@ -143,6 +148,20 @@ public class CommunicationManager {
 			connection.cancelConnection();
 	}
 	
+	/**
+	 * Stop all connections, and stop all waiting connection threads.
+	 */
+	public void close(){
+		synchronized(connections){
+			for(ConnectionThread thread: connections.values())
+				thread.cancelConnection();
+		}
+		synchronized(waitingConnectionThreads){
+			for(WaitConnectionThread thread: waitingConnectionThreads)
+				thread.stopWaiting();
+		}
+	}
+	
 	private int getConncetionId(){
 		synchronized(idLock){
 			if(idSet.isEmpty()){
@@ -171,6 +190,7 @@ public class CommunicationManager {
 		private final int port;
 		private final OnConnectionListener listener;
 		private final LinkedBlockingQueue<Runnable> listenerRunQueue = new LinkedBlockingQueue<Runnable>(1000);
+		private ServerSocket server;
 		private final Runnable stop = new Runnable(){
 			@Override
 			public void run(){
@@ -195,12 +215,18 @@ public class CommunicationManager {
 			}.start();
 		}
 		
+		public void stopWaiting(){
+			if(server != null)
+				try {
+					server.close();
+				} catch (IOException e) {}
+		}
+		
 		@Override
-		@SuppressWarnings("resource")
 		public void run(){
 			int id = -1;
 			try {
-				ServerSocket server = new ServerSocket(port);
+				server = new ServerSocket(port);
 				while (true) {
 					final Socket socket = server.accept();
 					id = getConncetionId();
@@ -223,7 +249,6 @@ public class CommunicationManager {
 					connectionThread.start();
 				}
 			} catch (IOException e) {
-				e.printStackTrace();
 				if(id > -1)
 					releaseConnectionId(id);
 				if(listener != null){

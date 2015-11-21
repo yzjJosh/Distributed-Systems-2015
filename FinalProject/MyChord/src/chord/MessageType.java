@@ -1,4 +1,4 @@
-package constants;
+package chord;
 
 public enum MessageType {
 	CONNECTION_REQUEST,
@@ -18,5 +18,7 @@ public enum MessageType {
 	PUT_RESPONSE,
 	GET,
 	GET_RESPONSE,
+	RECOVER_DATA,
+	RECOVER_DATA_RESPONSE,
 	NOTIFY
 }

@@ -275,6 +275,14 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		return set;
 	}
 	
+	/**
+	 * Disconnect this FusionBackupHashMap from all backup repositories
+	 */
+	public void disConnect(){
+		manager.close();
+		pauseThread.terminate();
+	}
+	
 	
 	private void recover() throws RecoverFailureException {
 		HashSet<Integer> connections = new HashSet<Integer>();
@@ -527,6 +535,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 		private Object pauseNumLock = new Object();
 		private Object isPausedLock = new Object();
 		private boolean isPaused = false;
+		private boolean terminate = false;
 		
 		public void pauseUpdate(){
 			synchronized(pauseNumLock){
@@ -550,11 +559,16 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 			}
 		}
 		
+		public void terminate(){
+			this.terminate = true;
+			this.interrupt();
+		}
+		
 		@Override
 		public void run(){
-			while(true){
+			while(!terminate){
 				synchronized(pauseNumLock){
-					while(pauseNum <= 0)
+					while(pauseNum <= 0 && !terminate)
 						try {
 							pauseNumLock.wait();
 						} catch (InterruptedException e) {}
@@ -565,7 +579,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 						isPausedLock.notifyAll();
 					}
 					synchronized(pauseNumLock){
-						while(pauseNum > 0)
+						while(pauseNum > 0 && !terminate)
 							try {
 								pauseNumLock.wait();
 							} catch (InterruptedException e) {}
@@ -735,10 +749,7 @@ public class FusionBackupHashMap<K extends Serializable, V> implements Map<K, V>
 	
 	private static FusionBackupHashMap<String, Integer> testRecover(HashMap<String, Integer> hm, FusionBackupHashMap<String, Integer> fm, HashMap<Integer, String> cluster, int id){
 		System.out.println("Testing recovery ...");
-		synchronized(fm.mapLock){
-			for(int connection: fm.connection2id.keySet())
-				fm.manager.closeConnection(connection);
-		}
+		fm.disConnect();
 		try {
 			Thread.sleep(500);
 		} catch (InterruptedException e){
