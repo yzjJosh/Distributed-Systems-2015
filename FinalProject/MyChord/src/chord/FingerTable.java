@@ -17,6 +17,10 @@ public class FingerTable {
 		fingers[index].successor = successor;
 	}
 	
+	public long getSuccessor(int index){
+		return fingers[index].successor;
+	}
+	
 	public long getStart(int index){
 		return fingers[index].start;
 	}

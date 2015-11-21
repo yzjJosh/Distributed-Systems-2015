@@ -206,7 +206,7 @@ public class ChordNode {
 						}						
 					}, true);
 		} catch(IOException e){
-			System.err.println("Error: Unable to send PUT!");
+			System.err.println("Error: Unable to send GET!");
 			result.put("success", false);
 		}
 		if(!(Boolean)result.get("success"))
@@ -261,46 +261,54 @@ public class ChordNode {
 	private long help_other_find_predecessor(Message msg) throws OperationFailsException{
 		long target = (Long) msg.get("target");
 		if(IDRing.isBetween(target, id, successor) || successor == target) return id;
-		long queryNode = fingerTable.closest_preceding_finger(target);
 		if(!msg.containsKey("origin"))
 			msg.put("origin", id);
-		if((Long)msg.get("origin") == queryNode){
-			System.err.println("Reach a circle!");				
-			throw new OperationFailsException();
-		}
-		final HashMap<String, Object> result = new HashMap<String, Object>();
-		try {
-			manager.sendMessageForResponse(id2link.get(queryNode), msg,
-					new MessageFilter(){
-						@Override
-						public boolean filter(Message msg) {
-							return msg!=null && msg.containsKey("MessageType")
-									&& msg.get("MessageType") == MessageType.FIND_PREDECESSOR_RESPONSE
-									&& msg.get("target").equals(target);
-						}
-					}, 5000, 
-					new OnMessageReceivedListener(){
-						@Override
-						public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
-							if((Boolean)msg.get("success")){
-								result.put("result", msg.get("result"));
-								result.put("success", true);
-							}else
+		long queryNode = fingerTable.closest_preceding_finger(target);
+		while(queryNode != id){
+			if((Long)msg.get("origin") == queryNode){
+				System.err.println("Reach a circle!");				
+				throw new OperationFailsException();
+			}
+			final HashMap<String, Object> result = new HashMap<String, Object>();
+			try {
+				manager.sendMessageForResponse(id2link.get(queryNode), msg,
+						new MessageFilter(){
+							@Override
+							public boolean filter(Message msg) {
+								return msg!=null && msg.containsKey("MessageType")
+										&& msg.get("MessageType") == MessageType.FIND_PREDECESSOR_RESPONSE
+										&& msg.get("target").equals(target);
+							}
+						}, 5000, 
+						new OnMessageReceivedListener(){
+							@Override
+							public void OnMessageReceived(CommunicationManager manager, int id, Message msg) {
+								if((Boolean)msg.get("success")){
+									result.put("result", msg.get("result"));
+									result.put("success", true);
+								}else
+									result.put("success", false);
+							}
+							@Override
+							public void OnReceiveError(CommunicationManager manager, int id) {
 								result.put("success", false);
-						}
-						@Override
-						public void OnReceiveError(CommunicationManager manager, int id) {
-							result.put("success", false);
-							System.err.println("Unable to receive FIND_PREDECESSOR_RESPONSE!");
-						}
-					}, true);
-		} catch (Exception e) {
-			System.err.println("Unable to send FIND_PREDECESSOR to "+queryNode);
-			throw new OperationFailsException("Unable to send FIND_PREDECESSOR to "+queryNode);
+								System.err.println("Unable to receive FIND_PREDECESSOR_RESPONSE!");
+							}
+						}, true);
+			} catch (Exception e) {
+				for(int i=31; i>=0; i--)
+					if(fingerTable.getSuccessor(i) == queryNode){
+						fingerTable.setSuccessor(i, fingerTable.getSuccessor(next(i, 32)));
+						queryNode = fingerTable.closest_preceding_finger(target);
+						break;
+					}
+				continue;
+			}
+			if(!(Boolean)result.get("success"))
+				throw new OperationFailsException();
+			return (Long) result.get("result");
 		}
-		if(!(Boolean)result.get("success"))
-			throw new OperationFailsException();
-		return (Long) result.get("result");
+		return id;
 	}
 	
 	private void join() throws OperationFailsException{
@@ -368,7 +376,7 @@ public class ChordNode {
 							return msg != null && msg.containsKey("MessageType") && 
 									msg.get("MessageType") == MessageType.TRANSFER_DATA_RESPONSE;
 						}
-					}, 10000, 
+					}, 5000, 
 					new OnMessageReceivedListener(){
 						@SuppressWarnings("unchecked")
 						@Override
@@ -506,7 +514,7 @@ public class ChordNode {
 				manager.sendMessage(id2link.get(successor), new Message().
 						put("MessageType", MessageType.NOTIFY).
 						put("target", id));
-			} catch (Exception e) {
+			} catch (IOException e) {
 				e.printStackTrace();
 				System.err.println("Node "+id+": Unable to send NOTIFY to "+successor+"!");
 				throw new OperationFailsException("Unable to send NOTIFY!");
@@ -641,6 +649,9 @@ public class ChordNode {
 						reply = new Message().put("MessageType", MessageType.RECOVER_DATA_RESPONSE);
 						try{
 							recoverDataOfNode((long) msg.get("target"));
+							synchronized(predecessorLock){
+								predecessor = link2id.get(id);
+							}
 							reply.put("success", true);
 						}catch(OperationFailsException e){
 							reply.put("success", false);
@@ -662,6 +673,7 @@ public class ChordNode {
 			long nodeId = link2id.remove(id);
 			id2link.remove(nodeId);
 			manager.closeConnection(id);
+			System.err.println(ChordNode.this.id+": "+nodeId+" is disconnected.");
 		}
 		
 	}
@@ -867,13 +879,22 @@ public class ChordNode {
 		newNode.stabilizeThread.exit();
 		System.out.println("Waiting for recovery...");
 		Thread.sleep(10000);
+		assert(nodes[2].successor == nodes[3].id);
+		assert(nodes[3].predecessor == nodes[2].id);
+		assert(nodes[1].successorOfSuccessor == nodes[3].id);
+		assert(nodes[2].successorOfSuccessor == nodes[4].id);
+		Map<Serializable, Serializable> test = new FusionBackupHashMap<Serializable, Serializable>(backupNodes, 5, new IntegerCoder());
+		assert(test.size() == 0);
+		for(int i=0; i<nodes.length; i++){
+			assert(nodes[i].id2link.size() == 4);
+			assert(nodes[i].link2id.size() == 4);
+		}
 		System.out.println("Testing recovery result");
 		for(Long key: data.keySet()){
 			for(int j=0; j<nodes.length; j++){
 				Serializable result = nodes[j].get(key);
 				assert(result != null && result.equals(data.get(key))):"Key is "+key+", got "+result+", which should be "+data.get(key);
 			}
-			assert(newNode.get(key).equals(data.get(key)));
 		}
 		System.out.println("Pass!");
 		
