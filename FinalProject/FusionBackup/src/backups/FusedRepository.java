@@ -1,8 +1,10 @@
 package backups;
 
+import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.Serializable;
-import java.net.Inet4Address;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 
@@ -757,17 +759,28 @@ public class FusedRepository {
 	}
 	
 	public static void main(String[] args) throws Exception{
+		String repositoryNodesInfo = args[0];
+		int index = Integer.parseInt(args[1]);
+		int volume = Integer.parseInt(args[2]);
 		HashMap<Integer, String> cluster = new HashMap<Integer, String>();
-		String ip = Inet4Address.getLocalHost().getHostAddress();
-		cluster.put(0, ip+":12345");
-		cluster.put(1, ip+":12346");
-		cluster.put(2, ip+":12347");
-		cluster.put(3, ip+":12348");
-		cluster.put(4, ip+":12349");
-		FusedRepository repo0 = new FusedRepository(2, 4, 0, cluster);
-		FusedRepository repo1 = new FusedRepository(2, 4, 1, cluster);
-		FusedRepository repo2 = new FusedRepository(2, 4, 2, cluster);
-		FusedRepository repo3 = new FusedRepository(2, 4, 3, cluster);
-//		FusedRepository repo4 = new FusedRepository(2, 4, 4, cluster);
+		String line = null;
+		int i = 0;
+		BufferedReader chordReader = new BufferedReader(new InputStreamReader(new FileInputStream(repositoryNodesInfo)));
+		try {
+			while((line = chordReader.readLine()) != null){
+				cluster.put(i, line);
+				i++;
+			}
+		} catch (IOException e) {
+			throw e;
+		} finally{
+			chordReader.close();
+		}
+		FusedRepository repo = new FusedRepository(2, volume, index, cluster);
+		BufferedReader commandReader = new BufferedReader(new InputStreamReader(System.in));
+		while((line = commandReader.readLine()) != null){
+			if(line.equals("info"))
+				System.out.println(repo);
+		}
 	}
 }
