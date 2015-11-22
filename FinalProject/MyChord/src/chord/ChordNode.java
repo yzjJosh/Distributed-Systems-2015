@@ -28,10 +28,10 @@ import exceptions.OperationFailsException;
 public class ChordNode {
 	
 	private final CommunicationManager manager;
-	private final long id;
-	private final ConcurrentHashMap<Integer, Long> link2id;
+	private final long id;      //ChordNode id
+	private final ConcurrentHashMap<Integer, Long> link2id;    
 	private final ConcurrentHashMap<Long, Integer> id2link;
-	private final HashMap<Long, Integer> id2primary;
+	private final HashMap<Long, Integer> id2primary;  //key : ChordNode id; value: FusionBackupHashMap id.
 	private final FingerTable fingerTable;
 	private long predecessor;
 	private final Object predecessorLock = new Object();
@@ -50,7 +50,7 @@ public class ChordNode {
 		if(chordNodesInfo == null || !chordNodesInfo.containsKey(index) || chordNodesInfo.get(index) == null)
 			throw new IllegalArgumentException();
 		manager = new CommunicationManager();
-		link2id = new ConcurrentHashMap<Integer, Long>();
+		link2id = new ConcurrentHashMap<Integer, Long>(); 
 		id2link = new ConcurrentHashMap<Long, Integer>();
 		id2primary = new HashMap<Long, Integer>();
 		this.backupNodesInfo = backupNodesInfo;
@@ -179,7 +179,7 @@ public class ChordNode {
 		final long keyId = hash(key);
 		long successor = find_successor(keyId);
 		if(successor == id){
-			dataLock.readerLock();
+			dataLock.readerLock(); 
 			Serializable ret = data.get(key);
 			dataLock.readerUnlock();
 			return ret;
@@ -907,7 +907,7 @@ public class ChordNode {
 			Integer result = (Integer) newNode.get(key);
 			assert(result.equals(data.get(key))): "Got "+result+", which should be "+data.get(key);
 		}
-		for(int i=0; i<1000; i++){
+		for(int i=0; i<1000; i++) {
 			long key = (long)(Math.random()*(1L<<32));
 			int value = (int)(Math.random()*Integer.MAX_VALUE);
 			newNode.put(key, value);
@@ -1016,26 +1016,43 @@ public class ChordNode {
 					String key = parts[1];
 					int value = Integer.parseInt(parts[2]);
 					chordNode.put(key, value);
-				}else if(cmd.equals("get")){
+					System.out.println("--------------------------------------------------------------------------------");
+					System.out.println("The pair ( " + key + ", " + value + " ) has been successfully stored in the Chord system!");
+					System.out.println("--------------------------------------------------------------------------------");
+				}else if(cmd.equals("get")) {
 					String key = parts[1];
-					System.out.println(chordNode.get(key));
-				}else if(cmd.equals("remove")){
+					Serializable value = chordNode.get(key);
+					System.out.println("--------------------------------------------------------------------------------");
+					if (value != null)
+						System.out.println("The corresponding value is: " + value);
+					else
+						System.out.println("Sorry, the required data is not stored in the system");
+					System.out.println("--------------------------------------------------------------------------------");
+				}else if(cmd.equals("remove")) {
 					String key = parts[1];
-					System.out.println(chordNode.remove(key));
-				}else if(cmd.equals("info")){
+					System.out.println("--------------------------------------------------------------------------------");
+					System.out.println("The value : " + chordNode.remove(key) + " has been removed!");
+					System.out.println("--------------------------------------------------------------------------------");
+				}else if(cmd.equals("info")) {
+					System.out.println("--------------------------------------------------------------------------------");
 					System.out.println("id: "+chordNode.id);
 					System.out.println("index: "+chordNode.id2primary.get(chordNode.id));
 					System.out.println("predecessor: "+chordNode.predecessor);
 					System.out.println("successor: "+chordNode.successor);
 					System.out.println("data: "+chordNode.data);
 					System.out.println("fingerTable: "+chordNode.fingerTable); 
+					System.out.println("--------------------------------------------------------------------------------");
 				}else if(cmd.equals("find") && parts[1].equals("node")){
 					long keyId = chordNode.hash(parts[2]);
-					System.out.println(chordNode.find_successor(keyId));
+					System.out.println("--------------------------------------------------------------------------------");
+					System.out.println("The successor id is " + chordNode.find_successor(keyId));
+					System.out.println("--------------------------------------------------------------------------------");
 				}
 			} catch (Exception e) {
+				System.out.println("--------------------------------------------------------------------------------");
 				System.err.println("Operation fails! Please try again!");
 				e.printStackTrace();
+				System.out.println("--------------------------------------------------------------------------------");
 			}
 		}
 	}
