@@ -427,8 +427,7 @@ public class ChordNode {
 							HashMap<Serializable, Serializable> response = (HashMap<Serializable, Serializable>) msg.get("result");
 							System.out.println("Got "+response.size()+" entries from successor!");
 							dataLock.writerLock();
-							for(Map.Entry<Serializable, Serializable> entry: response.entrySet())
-								data.put(entry.getKey(), entry.getValue());
+							data.putAll(response);
 							dataLock.writerUnlock();
 							try {
 								manager.sendMessage(id, new Message().put("MessageType", MessageType.TRANSFER_DATA_ACK));
@@ -562,6 +561,10 @@ public class ChordNode {
 				System.err.println("Node "+id+": Unable to send NOTIFY to "+successor+"!");
 				throw new OperationFailsException("Unable to send NOTIFY!");
 			}
+		else
+			synchronized(predecessorLock){
+				predecessor = id;
+			}
 		long nextSuccessor = get_successor(successor);
 		synchronized(successorOfSuccessorLock){
 			successorOfSuccessor = nextSuccessor;
@@ -649,9 +652,11 @@ public class ChordNode {
 						final HashMap<Serializable, Serializable> transfer = new HashMap<Serializable, Serializable>();
 						long nodeId = (Long) msg.get("id");
 						dataLock.readerLock();
-						for(Map.Entry<Serializable, Serializable> entry: data.entrySet())
-							if(hash(entry.getKey()) <= nodeId)
+						for(Map.Entry<Serializable, Serializable> entry: data.entrySet()){
+							long keyId = hash(entry.getKey());
+							if(!(IDRing.isBetween(keyId, nodeId, ChordNode.this.id)||keyId == ChordNode.this.id))
 								transfer.put(entry.getKey(), entry.getValue());
+						}
 						dataLock.readerUnlock();
 						manager.sendMessageForResponse(id, new Message().put("MessageType", MessageType.TRANSFER_DATA_RESPONSE).
 								put("result", transfer),
@@ -1017,6 +1022,16 @@ public class ChordNode {
 				}else if(cmd.equals("remove")){
 					String key = parts[1];
 					System.out.println(chordNode.remove(key));
+				}else if(cmd.equals("info")){
+					System.out.println("id: "+chordNode.id);
+					System.out.println("index: "+chordNode.id2primary.get(chordNode.id));
+					System.out.println("predecessor: "+chordNode.predecessor);
+					System.out.println("successor: "+chordNode.successor);
+					System.out.println("data: "+chordNode.data);
+					System.out.println("fingerTable: "+chordNode.fingerTable); 
+				}else if(cmd.equals("find") && parts[1].equals("node")){
+					long keyId = chordNode.hash(parts[2]);
+					System.out.println(chordNode.find_successor(keyId));
 				}
 			} catch (Exception e) {
 				System.err.println("Operation fails! Please try again!");
