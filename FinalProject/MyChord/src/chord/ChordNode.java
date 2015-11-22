@@ -28,10 +28,10 @@ import exceptions.OperationFailsException;
 public class ChordNode {
 	
 	private final CommunicationManager manager;
-	private final long id;
-	private final ConcurrentHashMap<Integer, Long> link2id;
+	private final long id;      //ChordNode id
+	private final ConcurrentHashMap<Integer, Long> link2id;    
 	private final ConcurrentHashMap<Long, Integer> id2link;
-	private final HashMap<Long, Integer> id2primary;
+	private final HashMap<Long, Integer> id2primary;  //key : ChordNode id; value: FusionBackupHashMap id.
 	private final FingerTable fingerTable;
 	private long predecessor;
 	private final Object predecessorLock = new Object();
@@ -50,7 +50,7 @@ public class ChordNode {
 		if(chordNodesInfo == null || !chordNodesInfo.containsKey(index) || chordNodesInfo.get(index) == null)
 			throw new IllegalArgumentException();
 		manager = new CommunicationManager();
-		link2id = new ConcurrentHashMap<Integer, Long>();
+		link2id = new ConcurrentHashMap<Integer, Long>(); 
 		id2link = new ConcurrentHashMap<Long, Integer>();
 		id2primary = new HashMap<Long, Integer>();
 		this.backupNodesInfo = backupNodesInfo;
@@ -179,7 +179,7 @@ public class ChordNode {
 		final long keyId = hash(key);
 		long successor = find_successor(keyId);
 		if(successor == id){
-			dataLock.readerLock();
+			dataLock.readerLock(); 
 			Serializable ret = data.get(key);
 			dataLock.readerUnlock();
 			return ret;
