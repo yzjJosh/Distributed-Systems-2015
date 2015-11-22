@@ -1047,6 +1047,24 @@ public class ChordNode {
 					System.out.println("--------------------------------------------------------------------------------");
 					System.out.println("The successor id is " + chordNode.find_successor(keyId));
 					System.out.println("--------------------------------------------------------------------------------");
+				}else if(cmd.equals("putfile")){
+					String filePath = parts[1];
+					BufferedReader fileReader = new BufferedReader(new InputStreamReader(new FileInputStream(filePath)));
+					int count = 0;
+					try {
+						while((line = fileReader.readLine()) != null){
+							String[] fields = line.split(" ");
+							chordNode.put(fields[0], Integer.parseInt(fields[1]));
+							count ++;
+						}
+					} catch (Exception e) {
+						throw e;
+					} finally{
+						fileReader.close();
+					}
+					System.out.println("--------------------------------------------------------------------------------");
+					System.out.println("Successfully put "+count+" pairs from file "+filePath);
+					System.out.println("--------------------------------------------------------------------------------");				
 				}
 			} catch (Exception e) {
 				System.out.println("--------------------------------------------------------------------------------");
