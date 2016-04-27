@@ -1,0 +1,78 @@
+include gro
+
+set ( "dt", 0.2 );
+set ( "ecoli_division_size_mean", 1 );
+
+
+  s := signal ( 1, 1 );
+
+  // definition of states
+  STATE_GO_UP := 0;
+  STATE_EXPLODE := 1;
+  STATE_STATIC := 2;
+program p(g, r, y, c) := {
+
+
+  // definition of local variables
+  struct := [ state := STATE_STATIC, t := 0, birth := 0, g := 0,
+  r := 0,
+  y := 0,
+  c := 0];
+
+  //Initial color is black
+  gfp := 0;
+  rfp := 0;
+  yfp := 0;
+  cfp := 0;
+  
+  struct.state = STATE_STATIC & daughter : {
+     struct.state := STATE_GO_UP,
+     struct.t := 0,   // Update time
+     set ( "ecoli_growth_rate", 0 ),
+     struct.g := rand(100),
+     struct.r := rand(100),
+     struct.y := rand(100),
+     struct.c := rand(100),
+     run(120)
+
+  }
+
+  struct.state = STATE_STATIC : {
+      set ( "ecoli_growth_rate", 0.0008 ),
+  }
+  
+  struct.state = STATE_GO_UP & struct.t < 1040 : { 
+	emit_signal ( s, 50 ),  //Emit signal
+  }
+
+
+  true : {
+        gfp := struct.g,
+	rfp := struct.r,
+	yfp := struct.y,
+	cfp := struct.c,
+   	struct.t := struct.t + dt  // Update time
+  }
+ 
+  struct.state = STATE_GO_UP & struct.t > 1000 & struct.t < 1040 : {
+  	set ( "ecoli_growth_rate", 0.12 ),
+        
+	run(250),
+	tumble(20),
+  }
+
+  struct.state = STATE_GO_UP & struct.t > rand(250) + 1040 : {
+  	die()
+  }
+
+};
+
+
+ecoli ( [ x := 0, y := 200, theta := -1.57 ], program p(20, 10, 300, 0) );
+//ecoli ( [ x := -100, y := 200, theta := -1.57 ], program p(200, 0, 30, 10) );
+ecoli ( [ x := 100, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
+//ecoli ( [ x := 200, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
+//foreach q : range 4 do
+//  ecoli ( [ x := 0, y := 200, theta := -1.57 ], program p(20, 10, 300, 0) );	
+//end;
+
