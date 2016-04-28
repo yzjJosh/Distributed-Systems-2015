@@ -1,78 +1,159 @@
 include gro
 
-set ( "dt", 0.2 );
+set ( "dt", 0.1 );
 set ( "ecoli_division_size_mean", 1 );
 
+s1 := signal ( 1, 1 );
+s2 := signal ( 1, 1 );
+s3 := signal ( 1, 1 );
+s4 := signal ( 1, 1 );
 
-  s := signal ( 1, 1 );
+signal_list := {s1, s2, s3, s4};
 
-  // definition of states
-  STATE_GO_UP := 0;
-  STATE_EXPLODE := 1;
-  STATE_STATIC := 2;
+color_r := {100, 0, 0, 0, 0, 100};
+color_g := {0, 100, 0, 0, 0, 100};
+color_y := {0, 0, 100, 0, 0, 100};
+color_c := {0, 0, 0, 100, 0, 100};
+
+// definition of states
+STATE_GO_UP := 0;
+STATE_EXPLODE := 1;
+STATE_STATIC := 2;
+
 program p(g, r, y, c) := {
 
 
   // definition of local variables
-  struct := [ state := STATE_STATIC, t := 0, birth := 0, g := 0,
-  r := 0,
-  y := 0,
-  c := 0];
+  struct := [ 
+	state := STATE_STATIC, //My state
+	t := 0,  //Current time
+	die_t := 1000, //Die time for exploded pieces
+	generation := 0,
+	x := 0
+  ];
 
-  //Initial color is black
-  gfp := 0;
-  rfp := 0;
-  yfp := 0;
-  cfp := 0;
-  
-  struct.state = STATE_STATIC & daughter : {
-     struct.state := STATE_GO_UP,
-     struct.t := 0,   // Update time
-     set ( "ecoli_growth_rate", 0 ),
-     struct.g := rand(100),
-     struct.r := rand(100),
-     struct.y := rand(100),
-     struct.c := rand(100),
-     run(120)
+  //Initialize color
+  gfp := g;
+  rfp := r;
+  yfp := y;
+  cfp := c;
 
-  }
+  // Set initial grow rate for source
+  set ( "ecoli_growth_rate", 0.1 );
 
-  struct.state = STATE_STATIC : {
-      set ( "ecoli_growth_rate", 0.0008 ),
-  }
-  
-  struct.state = STATE_GO_UP & struct.t < 1040 : { 
-	emit_signal ( s, 50 ),  //Emit signal
-  }
-
-
+  // Called for all cells
   true : {
-        gfp := struct.g,
-	rfp := struct.r,
-	yfp := struct.y,
-	cfp := struct.c,
    	struct.t := struct.t + dt  // Update time
   }
- 
-  struct.state = STATE_GO_UP & struct.t > 1000 & struct.t < 1040 : {
-  	set ( "ecoli_growth_rate", 0.12 ),
-        
-	run(250),
-	tumble(20),
+  
+  //Called in a firework when it starts going up
+  struct.state = STATE_STATIC & daughter : {
+     	struct.state := STATE_GO_UP, 
+     	struct.t := 0,   // Reset time
+     	set ( "ecoli_growth_rate", 0 ), //Disable division
+     	run(120), //Begin running
+
+	// Generate random color
+	struct.x := rand(6),
+	gfp := color_g[struct.x],
+	rfp := color_r[struct.x],
+	yfp := color_y[struct.x],
+	cfp := color_c[struct.x],
+
+	struct.x  := rand(4), //Random signal index when going up
   }
 
-  struct.state = STATE_GO_UP & struct.t > rand(250) + 1040 : {
+  //Called when going up
+  struct.state = STATE_GO_UP : {
+	emit_signal(signal_list[struct.x], 50)
+  }
+
+ 
+  //Called in a firework when it starts exploding
+  struct.state = STATE_GO_UP & struct.t > 1000 : {
+	struct.state := STATE_EXPLODE,
+	struct.generation := 0,
+	struct.t := 0,  //Reset time
+  	set ( "ecoli_growth_rate", 0.12 ), //Enable division   
+  }
+	
+  //Called in a firework piece when it split into pieces
+  struct.state = STATE_EXPLODE & just_divided : {
+	struct.generation := struct.generation + 1,
+	struct.t := 0,	 //Reset time
+	
+	struct.x := rand(4),
+	emit_signal ( signal_list[struct.x], 50 ),  //Emit signal	
+
+	//Choose random die time
+	struct.die_t := rand(50),
+
+	// Generate random color
+	struct.x := rand(6),
+	gfp := color_g[struct.x],
+	rfp := color_r[struct.x],
+	yfp := color_y[struct.x],
+	cfp := color_c[struct.x],
+
+	struct.x := rand(4) // Random signal index when dies
+  }
+
+  //Called when the 6th generation are produced
+  struct.state = STATE_EXPLODE & struct.generation = 7: {
+	struct.generation := struct.generation + 1,
+	set ( "ecoli_growth_rate", 0 ), //Disable division 
+  }
+
+  //Called for exploded pieces
+  struct.state = STATE_EXPLODE & struct.t < 0.7*struct.die_t: {
+	tumble(20), //Spin
+	run(150 - struct.t*3), //Run quickly
+  }
+
+  struct.state = STATE_EXPLODE & struct.t > 0.7*struct.die_t: {
+	emit_signal ( signal_list[struct.x], 50 )  //Emit signal	
+  }
+  
+  struct.state = STATE_EXPLODE & struct.t > struct.die_t : {
   	die()
+  }
+
+  //Called in a source when it emits a firework
+  struct.state = STATE_STATIC & just_divided & !daughter: {
+      	set( "ecoli_growth_rate", 0 ), //Disable division
+	struct.t := 0 //Reset time
+  }
+
+  //Called in a source 1000 minutes after its last emission
+  struct.state = STATE_STATIC & struct.t > 1000: {
+	set( "ecoli_growth_rate", 0.1 ) //Enable division
   }
 
 };
 
 
+program main() := {
+  t := 0;
+
+  t > 1000: {
+    foreach i in (range 4) do
+      set_signal ( signal_list[i],
+        250*sin((i+1)*0.25*t+6.28*i/5.0),
+        250*cos((5-i)*0.25*t+6.28*i/5.0),
+        100 )
+    end
+  }
+
+  t > 1050: { t := 0 }
+
+  true : { t := t + dt }
+};
+
+
+
 ecoli ( [ x := 0, y := 200, theta := -1.57 ], program p(20, 10, 300, 0) );
-//ecoli ( [ x := -100, y := 200, theta := -1.57 ], program p(200, 0, 30, 10) );
+ecoli ( [ x := -100, y := 200, theta := -1.57 ], program p(200, 0, 30, 10) );
 ecoli ( [ x := 100, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
-//ecoli ( [ x := 200, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
-//foreach q : range 4 do
-//  ecoli ( [ x := 0, y := 200, theta := -1.57 ], program p(20, 10, 300, 0) );	
-//end;
+ecoli ( [ x := 200, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
+
 
