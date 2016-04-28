@@ -3,10 +3,10 @@ include gro
 set ( "dt", 0.1 );
 set ( "ecoli_division_size_mean", 1 );
 
-s1 := signal ( 1, 1 );
-s2 := signal ( 1, 1 );
-s3 := signal ( 1, 1 );
-s4 := signal ( 1, 1 );
+s1 := signal ( 0.5, 0.3 );
+s2 := signal ( 0.5, 0.3 );
+s3 := signal ( 0.5, 0.3 );
+s4 := signal ( 0.5, 0.3 );
 
 signal_list := {s1, s2, s3, s4};
 
@@ -83,7 +83,7 @@ program p(g, r, y, c) := {
 	struct.t := 0,	 //Reset time
 	
 	struct.x := rand(4),
-	emit_signal ( signal_list[struct.x], 50 ),  //Emit signal	
+	emit_signal ( signal_list[struct.x], 100 ),  //Emit signal	
 
 	//Choose random die time
 	struct.die_t := rand(50),
@@ -111,22 +111,16 @@ program p(g, r, y, c) := {
   }
 
   struct.state = STATE_EXPLODE & struct.t > 0.7*struct.die_t: {
-	emit_signal ( signal_list[struct.x], 50 )  //Emit signal	
+	emit_signal ( signal_list[struct.x], 100 )  //Emit signal	
   }
   
   struct.state = STATE_EXPLODE & struct.t > struct.die_t : {
-  	die()
+        die()
   }
 
   //Called in a source when it emits a firework
   struct.state = STATE_STATIC & just_divided & !daughter: {
-      	set( "ecoli_growth_rate", 0 ), //Disable division
-	struct.t := 0 //Reset time
-  }
-
-  //Called in a source 1000 minutes after its last emission
-  struct.state = STATE_STATIC & struct.t > 1000: {
-	set( "ecoli_growth_rate", 0.1 ) //Enable division
+      	die()
   }
 
 };
@@ -140,7 +134,7 @@ program main() := {
       set_signal ( signal_list[i],
         250*sin((i+1)*0.25*t+6.28*i/5.0),
         250*cos((5-i)*0.25*t+6.28*i/5.0),
-        100 )
+        200 )
     end
   }
 
