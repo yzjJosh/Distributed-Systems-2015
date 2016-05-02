@@ -99,7 +99,7 @@ program p(g, r, y, c) := {
   }
 
   //Called when the 6th generation are produced
-  struct.state = STATE_EXPLODE & struct.generation = 7: {
+  struct.state = STATE_EXPLODE & struct.generation = 8: {
 	struct.generation := struct.generation + 1,
 	set ( "ecoli_growth_rate", 0 ), //Disable division 
   }
@@ -138,7 +138,7 @@ program main() := {
     end
   }
 
-  t > 1050: { t := 0 }
+  t > 1070: { t := 0 }
 
   true : { t := t + dt }
 };
@@ -149,5 +149,7 @@ ecoli ( [ x := 0, y := 200, theta := -1.57 ], program p(20, 10, 300, 0) );
 ecoli ( [ x := -100, y := 200, theta := -1.57 ], program p(200, 0, 30, 10) );
 ecoli ( [ x := 100, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
 ecoli ( [ x := 200, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
-
+ecoli ( [ x := -200, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
+ecoli ( [ x := 300, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
+ecoli ( [ x := -300, y := 200, theta := -1.57 ], program p(20, 20, 0, 110) );
 
